@@ -60,13 +60,29 @@ function polyArea(poly) {
   return Math.abs(a / 2);
 }
 
-function pointWalkable(map, p) {
-  if (!p) return false;
+function polyFlagsAt(map, p) {
+  if (!p) return null;
   for (const poly of map.layers.walk) {
     if (!poly) continue;
-    if (pointInPoly(p.x, p.y, poly.pts)) return true;
+    if (pointInPoly(p.x, p.y, poly.pts)) return poly.flags ?? [];
   }
-  return false;
+  return null;
+}
+
+function pointWalkable(map, p, ch) {
+  const flags = polyFlagsAt(map, p);
+  if (flags === null) return false;
+  if (flags.includes("climb") && !(ch && ch.canClimb)) return false;
+  if (flags.includes("acro") && !(ch && ch.canAcro)) return false;
+  return true;
+}
+
+function speedMult(map, p) {
+  const flags = polyFlagsAt(map, p);
+  if (!flags || flags.length === 0) return 1;
+  if (flags.includes("acro")) return 1.6;
+  if (flags.includes("climb")) return 0.55;
+  return 1;
 }
 
 function pointHidden(map, p) {
@@ -79,14 +95,14 @@ function pointBlocksSight(map, p) {
   return false;
 }
 
-function segWalkable(map, a, b) {
+function segWalkable(map, a, b, ch) {
   const dx = b.x - a.x;
   const dy = b.y - a.y;
   const dist = Math.hypot(dx, dy);
   const steps = Math.min(100, Math.max(2, Math.ceil(dist / 8)));
   for (let i = 0; i <= steps; i++) {
     const t = i / steps;
-    if (!pointWalkable(map, { x: a.x + dx * t, y: a.y + dy * t })) return false;
+    if (!pointWalkable(map, { x: a.x + dx * t, y: a.y + dy * t }, ch)) return false;
   }
   return true;
 }
@@ -103,13 +119,13 @@ function hasLineOfSight(map, a, b) {
   return true;
 }
 
-function nearestWalkable(map, p) {
-  if (pointWalkable(map, p)) return { x: p.x, y: p.y };
+function nearestWalkable(map, p, ch) {
+  if (pointWalkable(map, p, ch)) return { x: p.x, y: p.y };
   for (let r = 12; r <= 200; r += 14) {
     for (let k = 0; k < 12; k++) {
       const a = (k / 12) * Math.PI * 2;
       const q = { x: p.x + Math.cos(a) * r, y: p.y + Math.sin(a) * r };
-      if (pointWalkable(map, q)) return q;
+      if (pointWalkable(map, q, ch)) return q;
     }
   }
   return null;
@@ -117,7 +133,7 @@ function nearestWalkable(map, p) {
 
 // ---------- Navigation: Sichtbarkeitsgraph über Polygonen ----------
 
-function buildNav(map) {
+function buildNav(map, ch, useTransitions) {
   const nodes = [];
   for (const poly of map.layers.walk) {
     const pts = poly.pts;
@@ -125,32 +141,52 @@ function buildNav(map) {
     nodes.push(centroid(pts));
     for (const p of pts) nodes.push({ x: p.x, y: p.y });
   }
+  const trans = useTransitions ? map.markers.transitions ?? [] : [];
+  for (const t of trans) {
+    nodes.push({ x: t.from.x, y: t.from.y });
+    nodes.push({ x: t.to.x, y: t.to.y });
+  }
   const adj = nodes.map(() => []);
   for (let i = 0; i < nodes.length; i++)
     for (let j = i + 1; j < nodes.length; j++)
-      if (segWalkable(map, nodes[i], nodes[j])) {
-        adj[i].push(j);
-        adj[j].push(i);
+      if (segWalkable(map, nodes[i], nodes[j], ch)) {
+        adj[i].push({ to: j, type: null });
+        adj[j].push({ to: i, type: null });
       }
+  // Übergänge: Türen für alle, Sprünge nur für Akrobaten
+  const base = nodes.length - trans.length * 2;
+  trans.forEach((t, k) => {
+    if (t.type !== "door" && !(ch && ch.canAcro)) return;
+    const fi = base + k * 2;
+    const ti = base + k * 2 + 1;
+    const d = Math.hypot(t.to.x - t.from.x, t.to.y - t.from.y);
+    const cost = t.type === "door" ? 40 : Math.max(60, d * 0.8);
+    adj[fi].push({ to: ti, type: t.type, cost });
+    adj[ti].push({ to: fi, type: t.type, cost });
+  });
   return { nodes, adj };
 }
 
-function smoothPath(map, path) {
+function smoothPath(map, path, ch) {
   if (path.length < 3) return path;
   const out = [path[0]];
   let i = 0;
   while (i < path.length - 1) {
     let j = path.length - 1;
-    for (; j > i + 1; j--) if (segWalkable(map, path[i], path[j])) break;
+    if (path[j].seg) j = i + 1; // Übergangskanten nicht überspringen
+    for (; j > i + 1; j--) {
+      if (path[j].seg) continue;
+      if (segWalkable(map, path[i], path[j], ch)) break;
+    }
     out.push(path[j]);
     i = j;
   }
   return out;
 }
 
-function findPath(map, nav, from, to) {
-  if (!pointWalkable(map, to)) return [];
-  const start = nearestWalkable(map, from);
+function findPath(map, nav, from, to, ch) {
+  if (!pointWalkable(map, to, ch)) return [];
+  const start = nearestWalkable(map, from, ch);
   if (!start) return [];
   const { nodes, adj } = nav;
   const N = nodes.length;
@@ -159,18 +195,19 @@ function findPath(map, nav, from, to) {
   const T = N + 1;
   const dist = new Array(N + 2).fill(Infinity);
   const prev = new Array(N + 2).fill(-1);
+  const etype = new Array(N + 2).fill(null);
   const visited = new Array(N + 2).fill(false);
   dist[S] = 0;
   const linksOf = (u) => {
     if (u === T) return [];
     if (u === S) {
       const out = [];
-      for (let k = 0; k < N; k++) if (segWalkable(map, pts[S], pts[k])) out.push(k);
-      if (segWalkable(map, pts[S], pts[T])) out.push(T);
+      for (let k = 0; k < N; k++) if (segWalkable(map, pts[S], pts[k], ch)) out.push({ to: k, type: null });
+      if (segWalkable(map, pts[S], pts[T], ch)) out.push({ to: T, type: null });
       return out;
     }
     const out = adj[u].slice();
-    if (segWalkable(map, pts[u], pts[T])) out.push(T);
+    if (segWalkable(map, pts[u], pts[T], ch)) out.push({ to: T, type: null });
     return out;
   };
   while (true) {
@@ -183,11 +220,14 @@ function findPath(map, nav, from, to) {
       }
     if (u === -1 || u === T) break;
     visited[u] = true;
-    for (const v of linksOf(u)) {
-      const nd = dist[u] + Math.hypot(pts[v].x - pts[u].x, pts[v].y - pts[u].y);
+    for (const ed of linksOf(u)) {
+      const v = ed.to;
+      const w = ed.cost ?? Math.hypot(pts[v].x - pts[u].x, pts[v].y - pts[u].y);
+      const nd = dist[u] + w;
       if (nd < dist[v]) {
         dist[v] = nd;
         prev[v] = u;
+        etype[v] = ed.type;
       }
     }
   }
@@ -195,11 +235,10 @@ function findPath(map, nav, from, to) {
   const path = [];
   let cur = T;
   while (cur !== -1) {
-    path.push(pts[cur]);
+    path.unshift({ x: pts[cur].x, y: pts[cur].y, seg: etype[cur] });
     cur = prev[cur];
   }
-  path.reverse();
-  return smoothPath(map, path);
+  return smoothPath(map, path, ch);
 }
 
 // ---------- Standardkarte (an die Bildkomposition angelehnt) ----------
@@ -241,7 +280,9 @@ function defaultMap(w, h) {
 
   const hedges = [0.2, 0.31, 0.46, 0.63, 0.74].map((t, i) => {
     const c = off(roadAt(t), i % 2 === 0 ? 1 : -1, roadHalf + 0.05 * h);
-    return { name: "Hecke", pts: octagon(c.x, c.y, 0.065 * h) };
+    return i === 2
+      ? { name: "Kletterhecke", pts: octagon(c.x, c.y, 0.065 * h), flags: ["climb"] }
+      : { name: "Hecke", pts: octagon(c.x, c.y, 0.065 * h) };
   });
 
   const castle = {
@@ -259,12 +300,18 @@ function defaultMap(w, h) {
     { name: "Waldstück", pts: octagon(0.24 * w, 0.52 * h, 0.04 * w) },
   ];
 
+  // Akrobatik-Dächer: eines grenzt an die Straße, das andere nur per Sprung erreichbar
+  const roofAC = off(roadAt(0.56), 1, roadHalf + 0.03 * h);
+  const roofBC = off(roadAt(0.7), -1, roadHalf + 0.18 * h);
+  const roofA = { name: "Marktdach", pts: octagon(roofAC.x, roofAC.y, 0.055 * h), flags: ["acro"] };
+  const roofB = { name: "Marktdach", pts: octagon(roofBC.x, roofBC.y, 0.055 * h), flags: ["acro"] };
+
   const sentryPost = { x: plazaC.x, y: plazaC.y + 0.14 * h * 0.45 };
 
   return {
     world: { w, h },
     layers: {
-      walk: [road, plaza, village].concat(hedges),
+      walk: [road, plaza, village].concat(hedges, [roofA, roofB]),
       hide: [village].concat(hedges),
       block: [castle].concat(trees),
     },
@@ -275,6 +322,15 @@ function defaultMap(w, h) {
         { type: "pacer", a: roadAt(0.12), b: roadAt(0.4) },
         { type: "pacer", a: roadAt(0.56), b: roadAt(0.84) },
         { type: "sentry", post: sentryPost, look: roadAt(0.55) },
+      ],
+      transitions: [
+        { type: "jump", name: "Dachsprung", from: roofAC, to: roofBC },
+        {
+          type: "door",
+          name: "Geheimgang",
+          from: { x: villageC.x + 30, y: villageC.y + 30 },
+          to: { x: plazaC.x - 30, y: plazaC.y + 40 },
+        },
       ],
     },
   };
@@ -287,9 +343,9 @@ function scaleMap(map, nw, nh) {
   const out = {
     world: { w: nw, h: nh },
     layers: {
-      walk: map.layers.walk.map((poly) => ({ name: poly.name, pts: poly.pts.map(sp) })),
-      hide: map.layers.hide.map((poly) => ({ name: poly.name, pts: poly.pts.map(sp) })),
-      block: map.layers.block.map((poly) => ({ name: poly.name, pts: poly.pts.map(sp) })),
+      walk: map.layers.walk.map((poly) => ({ name: poly.name, flags: poly.flags, pts: poly.pts.map(sp) })),
+      hide: map.layers.hide.map((poly) => ({ name: poly.name, flags: poly.flags, pts: poly.pts.map(sp) })),
+      block: map.layers.block.map((poly) => ({ name: poly.name, flags: poly.flags, pts: poly.pts.map(sp) })),
     },
     markers: {
       escape: {
@@ -303,6 +359,12 @@ function scaleMap(map, nw, nh) {
           ? { type: "pacer", a: sp(gd.a), b: sp(gd.b) }
           : { type: "sentry", post: sp(gd.post), look: sp(gd.look) },
       ),
+      transitions: (map.markers.transitions ?? []).map((tr) => ({
+        type: tr.type,
+        name: tr.name ?? "",
+        from: sp(tr.from),
+        to: sp(tr.to),
+      })),
     },
   };
   return out;
@@ -310,11 +372,41 @@ function scaleMap(map, nw, nh) {
 
 // ---------- Bewegung ----------
 
-function moveAlongPath(e, speed, dt) {
+function moveAlongPath(e, speed, dt, map) {
+  if (e.jump) {
+    e.jump.t += (dt * 300) / Math.max(30, e.jump.dist);
+    if (e.jump.t >= 1) {
+      e.x = e.jump.x1;
+      e.y = e.jump.y1;
+      e.facing = e.jump.ang;
+      e.jump = null;
+      e.path.shift();
+    }
+    return true;
+  }
   if (!e.path.length || speed <= 0) return false;
   let budget = speed * dt;
   while (budget > 0 && e.path.length) {
     const target = e.path[0];
+    if (target.seg === "door") {
+      e.path.shift();
+      e.x = target.x;
+      e.y = target.y;
+      continue;
+    }
+    if (target.seg === "jump") {
+      e.path.shift();
+      e.jump = {
+        x0: e.x,
+        y0: e.y,
+        x1: target.x,
+        y1: target.y,
+        t: 0,
+        dist: Math.hypot(target.x - e.x, target.y - e.y),
+        ang: Math.atan2(target.y - e.y, target.x - e.x),
+      };
+      return true;
+    }
     const dx = target.x - e.x;
     const dy = target.y - e.y;
     const dist = Math.hypot(dx, dy);
@@ -336,7 +428,7 @@ function moveAlongPath(e, speed, dt) {
 // ---------- Spielzustand ----------
 
 function newGame(map) {
-  const nav = buildNav(map);
+  const nav = buildNav(map, null, false);
   const esc = map.markers.escape;
   const startOffsets = [
     { x: -26, y: 10 },
@@ -344,13 +436,13 @@ function newGame(map) {
     { x: -10, y: 32 },
   ];
   const charDefs = [
-    { id: "robin", name: "Robin", role: "Ausgewogen", color: "#2f7d32", speed: 132, sneakSpeed: 72, koRange: 46 },
+    { id: "robin", name: "Robin", role: "Ausgewogen · klettert", color: "#2f7d32", speed: 132, sneakSpeed: 72, koRange: 46, canClimb: true },
     { id: "john", name: "Little John", role: "K.o. aus der Distanz", color: "#6b4f2a", speed: 118, sneakSpeed: 64, koRange: 72 },
-    { id: "marian", name: "Marian", role: "Schnellste Läuferin", color: "#3b6fa0", speed: 152, sneakSpeed: 82, koRange: 44 },
+    { id: "marian", name: "Marian", role: "Schnell · Akrobatin", color: "#3b6fa0", speed: 152, sneakSpeed: 82, koRange: 44, canAcro: true },
   ];
   const chars = charDefs.map((cd, i) => {
     const raw = { x: esc.x + startOffsets[i].x, y: esc.y + startOffsets[i].y };
-    const pos = nearestWalkable(map, raw) ?? { x: esc.x, y: esc.y };
+    const pos = nearestWalkable(map, raw, cd) ?? { x: esc.x, y: esc.y };
     return {
       ...cd,
       x: pos.x,
@@ -359,8 +451,11 @@ function newGame(map) {
       facing: -Math.PI / 3,
       koTarget: null,
       caught: false,
+      jump: null,
     };
   });
+  const charNavs = {};
+  for (const c of chars) charNavs[c.id] = buildNav(map, c, true);
 
   const guards = map.markers.guards.map((gd, i) => {
     const pacer = gd.type === "pacer";
@@ -369,12 +464,12 @@ function newGame(map) {
     let post;
     let look;
     if (pacer) {
-      a = nearestWalkable(map, gd.a) ?? gd.a ?? { x: 0, y: 0 };
-      b = nearestWalkable(map, gd.b) ?? gd.b ?? a;
+      a = nearestWalkable(map, gd.a, null) ?? gd.a ?? { x: 0, y: 0 };
+      b = nearestWalkable(map, gd.b, null) ?? gd.b ?? a;
       post = a;
       look = b;
     } else {
-      post = nearestWalkable(map, gd.post) ?? gd.post ?? { x: 0, y: 0 };
+      post = nearestWalkable(map, gd.post, null) ?? gd.post ?? { x: 0, y: 0 };
       look = gd.look ?? { x: post.x + 100, y: post.y };
       a = post;
       b = look;
@@ -407,6 +502,7 @@ function newGame(map) {
   return {
     map,
     nav,
+    charNavs,
     chars,
     guards,
     selected: 0,
@@ -441,8 +537,8 @@ function updateGame(g, dt, notify) {
 
   for (const c of g.chars) {
     if (c.caught) continue;
-    const speed = g.sneak ? c.sneakSpeed : c.speed;
-    const moving = moveAlongPath(c, speed, dt);
+    const base = g.sneak ? c.sneakSpeed : c.speed;
+    const moving = moveAlongPath(c, base * speedMult(map, c), dt, map);
 
     if (moving && !g.sneak && g.time - g.noiseAt > 0.4) {
       g.noiseAt = g.time;
@@ -562,7 +658,7 @@ function updateGame(g, dt, notify) {
           guard.repathAt = g.time;
           guard.path = findPath(map, g.nav, guard, wp);
         }
-        const arrived = !moveAlongPath(guard, guard.speed, dt);
+        const arrived = !moveAlongPath(guard, guard.speed, dt, map);
         guard.pauseCooldown -= dt;
         if (arrived && Math.hypot(guard.x - wp.x, guard.y - wp.y) < 30) {
           guard.wpIndex = (guard.wpIndex + 1) % guard.homePath.length;
@@ -576,7 +672,7 @@ function updateGame(g, dt, notify) {
         }
       }
     } else if (guard.state === "suspicious") {
-      const moving = moveAlongPath(guard, 82, dt);
+      const moving = moveAlongPath(guard, 82, dt, map);
       if (!moving) {
         guard.scanTimer += dt;
         guard.facing += dt * 1.4;
@@ -592,7 +688,7 @@ function updateGame(g, dt, notify) {
         const target = guard.lastSeen ?? activeChars[0];
         if (target) guard.path = findPath(map, g.nav, guard, target);
       }
-      moveAlongPath(guard, 118, dt);
+      moveAlongPath(guard, 118, dt, map);
     }
 
     if (guard.state === "alert") {
@@ -737,25 +833,52 @@ function drawGuard(ctx, guard, t) {
   }
 }
 
+function entPos(e) {
+  if (e.jump) {
+    const t = e.jump.t;
+    return {
+      x: e.jump.x0 + (e.jump.x1 - e.jump.x0) * t,
+      y: e.jump.y0 + (e.jump.y1 - e.jump.y0) * t - Math.sin(Math.PI * t) * 48,
+    };
+  }
+  return { x: e.x, y: e.y };
+}
+
 function drawChar(ctx, c, selected, t) {
+  const p = entPos(c);
+  if (c.jump) {
+    ctx.strokeStyle = "rgba(251,191,36,0.5)";
+    ctx.lineWidth = 2;
+    ctx.setLineDash([5, 5]);
+    ctx.beginPath();
+    ctx.moveTo(c.jump.x0, c.jump.y0);
+    ctx.quadraticCurveTo(
+      (c.jump.x0 + c.jump.x1) / 2,
+      (c.jump.y0 + c.jump.y1) / 2 - 60,
+      c.jump.x1,
+      c.jump.y1,
+    );
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
   if (selected) {
     ctx.strokeStyle = `rgba(251,191,36,${0.6 + Math.sin(t * 4) * 0.3})`;
     ctx.lineWidth = 3;
     ctx.beginPath();
-    ctx.ellipse(c.x, c.y + 3, 17, 8, 0, 0, Math.PI * 2);
+    ctx.ellipse(p.x, p.y + 3, 17, 8, 0, 0, Math.PI * 2);
     ctx.stroke();
   }
   ctx.fillStyle = "#00000033";
   ctx.beginPath();
-  ctx.ellipse(c.x, c.y + 3, 11, 5, 0, 0, Math.PI * 2);
+  ctx.ellipse(p.x, p.y + 3, 11, 5, 0, 0, Math.PI * 2);
   ctx.fill();
   ctx.fillStyle = c.color;
   ctx.beginPath();
-  ctx.arc(c.x, c.y - 10, 10, 0, Math.PI * 2);
+  ctx.arc(p.x, p.y - 10, 10, 0, Math.PI * 2);
   ctx.fill();
   ctx.fillStyle = "#00000044";
   ctx.beginPath();
-  ctx.arc(c.x, c.y - 12, 7, Math.PI, Math.PI * 2);
+  ctx.arc(p.x, p.y - 12, 7, Math.PI, Math.PI * 2);
   ctx.fill();
 }
 
@@ -763,9 +886,13 @@ function drawPlay(ctx, g, t, showWalk) {
   const map = g.map;
 
   if (showWalk) {
-    ctx.fillStyle = "rgba(134,239,172,0.14)";
     for (const poly of map.layers.walk) {
+      const flags = poly.flags ?? [];
+      let color = "rgba(134,239,172,0.14)";
+      if (flags.includes("climb")) color = "rgba(96,165,250,0.18)";
+      else if (flags.includes("acro")) color = "rgba(244,114,182,0.18)";
       fillPolyPath(ctx, poly.pts);
+      ctx.fillStyle = color;
       ctx.fill();
     }
   }
@@ -812,6 +939,41 @@ function drawPlay(ctx, g, t, showWalk) {
   ctx.fillStyle = g.gold ? "#3f2f18" : "#facc15";
   ctx.fillRect(gold.x - 15, gold.y - 11, 30, 6);
 
+  // Übergänge (Türen + Sprünge)
+  for (const tr of map.markers.transitions ?? []) {
+    if (tr.type === "door") {
+      ctx.strokeStyle = "rgba(167,139,250,0.55)";
+      ctx.lineWidth = 2;
+      ctx.setLineDash([3, 5]);
+      ctx.beginPath();
+      ctx.moveTo(tr.from.x, tr.from.y);
+      ctx.lineTo(tr.to.x, tr.to.y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      for (const key of ["from", "to"]) {
+        ctx.fillStyle = "#a78bfa";
+        ctx.fillRect(tr[key].x - 7, tr[key].y - 10, 14, 20);
+        ctx.fillStyle = "#2e1065";
+        ctx.fillRect(tr[key].x - 3, tr[key].y - 6, 6, 12);
+      }
+    } else {
+      ctx.strokeStyle = "rgba(251,191,36,0.55)";
+      ctx.lineWidth = 2.5;
+      ctx.setLineDash([7, 6]);
+      ctx.beginPath();
+      ctx.moveTo(tr.from.x, tr.from.y);
+      ctx.quadraticCurveTo((tr.from.x + tr.to.x) / 2, (tr.from.y + tr.to.y) / 2 - 55, tr.to.x, tr.to.y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = "rgba(251,191,36,0.8)";
+      for (const key of ["from", "to"]) {
+        ctx.beginPath();
+        ctx.arc(tr[key].x, tr[key].y, 5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  }
+
   for (const guard of g.guards) {
     if (guard.state === "knocked") continue;
     drawCone(ctx, g, guard);
@@ -854,21 +1016,27 @@ function drawEdit(ctx, map, edit, hover) {
       const pts = poly.pts;
       if (pts.length < 2) continue;
       const sel = edit.selected && edit.selected.layer === layerName && edit.selected.index === pi;
+      const flags = poly.flags ?? [];
+      let strokeCol = sel ? "#fbbf24" : style.stroke;
+      if (!sel && flags.includes("climb")) strokeCol = "#60a5fa";
+      else if (!sel && flags.includes("acro")) strokeCol = "#f472b6";
       fillPolyPath(ctx, pts);
       ctx.fillStyle = style.fill;
       ctx.fill();
-      ctx.strokeStyle = sel ? "#fbbf24" : style.stroke;
+      ctx.strokeStyle = strokeCol;
       ctx.lineWidth = sel ? 3 : 1.5;
       ctx.stroke();
-      if (poly.name) {
+      const flagTxt = flags.includes("climb") ? "Klettern" : flags.includes("acro") ? "Akrobatik" : "";
+      const label = poly.name ? poly.name + (flagTxt ? ` (${flagTxt})` : "") : flagTxt;
+      if (label) {
         const c = centroid(pts);
         ctx.font = "bold 14px Georgia, serif";
         ctx.textAlign = "center";
         ctx.lineWidth = 4;
         ctx.strokeStyle = "rgba(0,0,0,0.75)";
-        ctx.strokeText(poly.name, c.x, c.y);
+        ctx.strokeText(label, c.x, c.y);
         ctx.fillStyle = "#fde68a";
-        ctx.fillText(poly.name, c.x, c.y);
+        ctx.fillText(label, c.x, c.y);
       }
       if (sel) {
         ctx.fillStyle = "#fbbf24";
@@ -958,6 +1126,40 @@ function drawEdit(ctx, map, edit, hover) {
       ctx.fillText(`POSTEN ${gi + 1}`, gd.post.x, gd.post.y - 16);
     }
   });
+
+  // Übergänge
+  (map.markers.transitions ?? []).forEach((tr, ti) => {
+    const isSel = edit.selectedTrans === ti;
+    const col = isSel ? "#fbbf24" : tr.type === "door" ? "#a78bfa" : "#fbbf24";
+    ctx.strokeStyle = col;
+    ctx.lineWidth = isSel ? 3 : 2;
+    ctx.setLineDash(tr.type === "door" ? [3, 5] : [7, 6]);
+    ctx.beginPath();
+    ctx.moveTo(tr.from.x, tr.from.y);
+    if (tr.type === "door") ctx.lineTo(tr.to.x, tr.to.y);
+    else
+      ctx.quadraticCurveTo(
+        (tr.from.x + tr.to.x) / 2,
+        (tr.from.y + tr.to.y) / 2 - 55,
+        tr.to.x,
+        tr.to.y,
+      );
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = col;
+    for (const key of ["from", "to"]) {
+      ctx.beginPath();
+      ctx.arc(tr[key].x, tr[key].y, 8, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.font = "bold 12px Georgia, serif";
+    ctx.textAlign = "center";
+    ctx.fillText(
+      tr.type === "door" ? tr.name || "TÜR" : "SPRUNG",
+      (tr.from.x + tr.to.x) / 2,
+      (tr.from.y + tr.to.y) / 2 - 14,
+    );
+  });
 }
 
 // ---------- Hauptkomponente ----------
@@ -974,7 +1176,7 @@ export default function App() {
   const hoverRef = useRef(null);
   const modeRef = useRef("play");
   const mapRef = useRef(null);
-  const editRef = useRef({ drawing: null, selected: null, selectedGuard: null });
+  const editRef = useRef({ drawing: null, selected: null, selectedGuard: null, selectedTrans: null });
   const bgFileRef = useRef(null);
   if (!mapRef.current) mapRef.current = defaultMap(worldDims.current.w, worldDims.current.h);
   if (!gameRef.current) gameRef.current = newGame(mapRef.current);
@@ -982,7 +1184,7 @@ export default function App() {
   const [mode, setMode] = useState("play");
   const [layer, setLayer] = useState("walk");
   const [imgOk, setImgOk] = useState(false);
-  const [editInfo, setEditInfo] = useState({ drawing: 0, selected: false, selectedGuard: null, name: "" });
+  const [editInfo, setEditInfo] = useState({ drawing: 0, selected: false, selectedGuard: null, selectedTrans: null, name: "", flags: [] });
   const [jsonText, setJsonText] = useState("");
   const [ui, setUi] = useState({
     selected: 0,
@@ -1005,14 +1207,17 @@ export default function App() {
 
   const syncEditInfo = useCallback(() => {
     const e = editRef.current;
+    const selPoly =
+      e.selected && mapRef.current.layers[e.selected.layer][e.selected.index]
+        ? mapRef.current.layers[e.selected.layer][e.selected.index]
+        : null;
     setEditInfo({
       drawing: e.drawing ? e.drawing.length : 0,
       selected: !!e.selected,
       selectedGuard: e.selectedGuard,
-      name:
-        e.selected && mapRef.current.layers[e.selected.layer][e.selected.index]
-          ? mapRef.current.layers[e.selected.layer][e.selected.index].name ?? ""
-          : "",
+      selectedTrans: e.selectedTrans,
+      name: selPoly ? selPoly.name ?? "" : "",
+      flags: selPoly ? selPoly.flags ?? [] : [],
     });
   }, []);
 
@@ -1059,7 +1264,7 @@ export default function App() {
   }, [pushMessage]);
 
   const enterEditor = useCallback(() => {
-    editRef.current = { drawing: null, selected: null, selectedGuard: null };
+    editRef.current = { drawing: null, selected: null, selectedGuard: null, selectedTrans: null };
     syncEditInfo();
     modeRef.current = "edit";
     setMode("edit");
@@ -1149,9 +1354,55 @@ export default function App() {
     mapRef.current.markers.guards.push({ type: "sentry", post: { x: cx, y: cy }, look: { x: cx + 140, y: cy + 60 } });
   }, []);
 
+  const toggleFlag = useCallback((flag, on) => {
+    const ed = editRef.current;
+    if (!ed.selected) return;
+    const poly = mapRef.current.layers[ed.selected.layer][ed.selected.index];
+    const flags = new Set(poly.flags ?? []);
+    if (on) flags.add(flag);
+    else flags.delete(flag);
+    poly.flags = Array.from(flags);
+    setEditInfo((p) => ({ ...p, flags: poly.flags }));
+  }, []);
+
+  const addJump = useCallback(() => {
+    const c = camRef.current;
+    const cx = c.x + VIEW_W / (2 * c.z);
+    const cy = c.y + VIEW_H / (2 * c.z);
+    if (!mapRef.current.markers.transitions) mapRef.current.markers.transitions = [];
+    mapRef.current.markers.transitions.push({
+      type: "jump",
+      name: "",
+      from: { x: cx - 70, y: cy },
+      to: { x: cx + 70, y: cy },
+    });
+  }, []);
+
+  const addDoor = useCallback(() => {
+    const c = camRef.current;
+    const cx = c.x + VIEW_W / (2 * c.z);
+    const cy = c.y + VIEW_H / (2 * c.z);
+    if (!mapRef.current.markers.transitions) mapRef.current.markers.transitions = [];
+    mapRef.current.markers.transitions.push({
+      type: "door",
+      name: "",
+      from: { x: cx - 60, y: cy },
+      to: { x: cx + 60, y: cy },
+    });
+  }, []);
+
+  const deleteTrans = useCallback(() => {
+    const e = editRef.current;
+    if (e.selectedTrans !== null) {
+      mapRef.current.markers.transitions.splice(e.selectedTrans, 1);
+      e.selectedTrans = null;
+      syncEditInfo();
+    }
+  }, [syncEditInfo]);
+
   const resetMap = useCallback(() => {
     mapRef.current = defaultMap(worldDims.current.w, worldDims.current.h);
-    editRef.current = { drawing: null, selected: null, selectedGuard: null };
+    editRef.current = { drawing: null, selected: null, selectedGuard: null, selectedTrans: null };
     syncEditInfo();
   }, [syncEditInfo]);
 
@@ -1182,7 +1433,9 @@ export default function App() {
       const parsed = JSON.parse(jsonText);
       if (!parsed.layers || !parsed.layers.walk || !parsed.markers) throw new Error("Struktur unvollständig");
       const normPoly = (p) =>
-        Array.isArray(p) ? { name: "", pts: p } : { name: p.name ?? "", pts: p.pts ?? p.points ?? [] };
+        Array.isArray(p)
+          ? { name: "", pts: p, flags: [] }
+          : { name: p.name ?? "", pts: p.pts ?? p.points ?? [], flags: p.flags ?? [] };
       mapRef.current = {
         ...parsed,
         layers: {
@@ -1191,6 +1444,7 @@ export default function App() {
           block: (parsed.layers.block ?? []).map(normPoly),
         },
       };
+      if (!mapRef.current.markers.transitions) mapRef.current.markers.transitions = [];
       worldDims.current = parsed.world ?? worldDims.current;
       pushMessage("Karte importiert.");
     } catch (err) {
@@ -1218,6 +1472,7 @@ export default function App() {
         if (k === "Delete" || k === "Backspace") {
           e.preventDefault();
           if (ed.selectedGuard !== null) deleteGuard();
+          else if (ed.selectedTrans !== null) deleteTrans();
           else deleteSelected();
         }
         return;
@@ -1244,7 +1499,7 @@ export default function App() {
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("keyup", onKeyUp);
     };
-  }, [restart, toggleSneak, whistle, toggleFollow, toggleWalk, finishPolygon, deleteSelected, deleteGuard, syncEditInfo]);
+  }, [restart, toggleSneak, whistle, toggleFollow, toggleWalk, finishPolygon, deleteSelected, deleteGuard, deleteTrans, syncEditInfo]);
 
   // Mausrad-Zoom
   useEffect(() => {
@@ -1303,6 +1558,11 @@ export default function App() {
     // Marker
     if (Math.hypot(map.markers.gold.x - w.x, map.markers.gold.y - w.y) < th) return { kind: "gold" };
     if (Math.hypot(map.markers.escape.x - w.x, map.markers.escape.y - w.y) < th) return { kind: "escape" };
+    for (let ti = 0; ti < (map.markers.transitions ?? []).length; ti++) {
+      const tr = map.markers.transitions[ti];
+      if (Math.hypot(tr.from.x - w.x, tr.from.y - w.y) < th) return { kind: "trans", ti, key: "from" };
+      if (Math.hypot(tr.to.x - w.x, tr.to.y - w.y) < th) return { kind: "trans", ti, key: "to" };
+    }
     // Punkte der ausgewählten Ebene zuerst
     const polys = map.layers[layer];
     for (let pi = polys.length - 1; pi >= 0; pi--) {
@@ -1340,12 +1600,17 @@ export default function App() {
       if (!hit) {
         ed.selected = null;
         ed.selectedGuard = null;
+        ed.selectedTrans = null;
         syncEditInfo();
         dragRef.current = { kind: "pan", last: { lx, ly }, moved: false };
         return;
       }
       ed.selectedGuard = null;
-      if (hit.kind === "guard") {
+      ed.selectedTrans = null;
+      if (hit.kind === "trans") {
+        ed.selectedTrans = hit.ti;
+        dragRef.current = { kind: "trans", ti: hit.ti, key: hit.key, last: { lx, ly }, moved: false };
+      } else if (hit.kind === "guard") {
         ed.selectedGuard = hit.gi;
         dragRef.current = { kind: "guard", gi: hit.gi, key: hit.key, last: { lx, ly }, moved: false };
       } else if (hit.kind === "gold") {
@@ -1390,6 +1655,9 @@ export default function App() {
       const poly = mapRef.current.layers[d.layer][d.index];
       for (let i = 0; i < poly.pts.length; i++)
         poly.pts[i] = { x: poly.pts[i].x + dx, y: poly.pts[i].y + dy };
+    } else if (d.kind === "trans") {
+      const tr = mapRef.current.markers.transitions[d.ti];
+      tr[d.key] = { x: tr[d.key].x + dx, y: tr[d.key].y + dy };
     } else if (d.kind === "guard") {
       const gd = mapRef.current.markers.guards[d.gi];
       gd[d.key] = { x: gd[d.key].x + dx, y: gd[d.key].y + dy };
@@ -1480,7 +1748,7 @@ export default function App() {
           pushMessage("Wache ausgeschaltet.");
         } else {
           c.koTarget = guard.id;
-          c.path = findPath(g.map, g.nav, c, { x: guard.x, y: guard.y });
+          c.path = findPath(g.map, g.charNavs[c.id], c, { x: guard.x, y: guard.y }, c);
         }
         return;
       }
@@ -1495,9 +1763,16 @@ export default function App() {
       }
 
       c.koTarget = null;
-      const path = findPath(g.map, g.nav, c, { x: wx, y: wy });
+      const path = findPath(g.map, g.charNavs[c.id], c, { x: wx, y: wy }, c);
       if (path.length) c.path = path.slice(1);
-      else pushMessage("Dort kann niemand laufen.");
+      else {
+        const flags = polyFlagsAt(g.map, { x: wx, y: wy });
+        if (flags && flags.includes("climb") && !c.canClimb)
+          pushMessage(`${c.name} kann nicht klettern.`);
+        else if (flags && flags.includes("acro") && !c.canAcro)
+          pushMessage(`${c.name} beherrscht keine Akrobatik.`);
+        else pushMessage("Dort kann niemand laufen.");
+      }
     },
     [pushMessage],
   );
@@ -1753,7 +2028,9 @@ export default function App() {
                   </div>
                   <p className="mt-2 text-[10px] leading-snug text-stone-400">
                     Im Versteck (grün gestrichelt) seid ihr unentdeckbar, solange kein Alarm herrscht. Posten werden
-                    regelmäßig abgelenkt (Punkte über dem Helm).
+                    regelmäßig abgelenkt (Punkte über dem Helm). Blaue Flächen = Klettern (nur Robin, langsam), rosa
+                    Flächen = Akrobatik (nur Marian, schnell). Violette Türchen teleportieren, gelbe Bögen sind
+                    Sprungübergänge.
                   </p>
                 </div>
 
@@ -1834,6 +2111,34 @@ export default function App() {
                     placeholder="Name des ausgewählten Polygons (z. B. Dorf, Burg, Fluss)"
                     className="mt-2 w-full rounded border border-stone-700 bg-stone-950 px-2 py-1.5 text-xs text-stone-200 placeholder:text-stone-500 disabled:opacity-40"
                   />
+                  <div className="mt-2 flex gap-4">
+                    <label
+                      className={`flex items-center gap-1.5 text-xs ${
+                        editInfo.selected ? "text-stone-200" : "text-stone-500"
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        disabled={!editInfo.selected}
+                        checked={editInfo.flags.includes("climb")}
+                        onChange={(e) => toggleFlag("climb", e.target.checked)}
+                      />
+                      Kletterbar
+                    </label>
+                    <label
+                      className={`flex items-center gap-1.5 text-xs ${
+                        editInfo.selected ? "text-stone-200" : "text-stone-500"
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        disabled={!editInfo.selected}
+                        checked={editInfo.flags.includes("acro")}
+                        onChange={(e) => toggleFlag("acro", e.target.checked)}
+                      />
+                      Akrobatik
+                    </label>
+                  </div>
                   <p className="mt-2 text-[10px] leading-snug text-stone-400">
                     Klick setzt Punkte, Klick auf den ersten Punkt oder Doppelklick schließt das Polygon. Punkte und
                     Flächen verschieben; Doppelklick auf eine Kante fügt einen Punkt ein.
@@ -1853,6 +2158,25 @@ export default function App() {
                   <p className="mt-2 text-[10px] leading-snug text-stone-400">
                     Patrouille: zwei Endpunkte (A↔B). Posten: Standpunkt + Blickpunkt. GOLD und FLUCHT verschiebbar.
                     Wachen-Punkte auf Laufflächen legen, sonst laufen sie nicht.
+                  </p>
+                </div>
+
+                <div className="rounded-lg border border-stone-700/60 bg-stone-900/40 p-3">
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-stone-400">Übergänge</p>
+                  <div className="flex flex-wrap gap-2">
+                    <Button size="sm" variant="outline" onClick={addJump}>
+                      + Sprung
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={addDoor}>
+                      + Tür
+                    </Button>
+                    <Button size="sm" variant="outline" disabled={editInfo.selectedTrans === null} onClick={deleteTrans}>
+                      Löschen (Entf)
+                    </Button>
+                  </div>
+                  <p className="mt-2 text-[10px] leading-snug text-stone-400">
+                    Sprung (gelb, Bogen): nur Akrobaten springen im Bogen von A nach B. Tür (violett): alle Figuren
+                    werden teleportiert. Beide Endpunkte auf begehbare Flächen legen und ziehen zum Anpassen.
                   </p>
                 </div>
 

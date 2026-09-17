@@ -4,18 +4,28 @@ Stealth-Taktik-Prototyp im Stil von "Robin Hood: The Legend of Sherwood".
 
 ## Features
 
-- **Polygon-Karte**: Ebenen `walk` (begehbar), `hide` (Versteck), `block` (Hindernis) — keine Tiles. Polygone sind benennbar (z. B. „Dorf“, „Burg“, „Fluss“).
-- **Navigation**: Sichtbarkeitsgraph (Knoten = Polygon-Ecken + Portale zwischen benachbarten Polygonen), Dijkstra-Pfadsuche, String-Pulling zur Glättung.
-- **Map-Editor**: Polygone zeichnen, benennen, verschieben, Ecken editieren (Doppelklick auf Kante fügt Punkt ein), Wachen/Marker ziehen, JSON-Export/-Import, Hintergrundbild laden.
-- **Stealth-Mechanik**: Sichtkegel der Wachen, Versteck-Mechanik (eigene Figuren unentdeckbar bis zum ersten Alarm), Pfeifen, Schleichen, K.o. von hinten, Alarmausbreitung.
+- **Polygon-Karte**: Ebenen `walk` (begehbar), `hide` (Versteck), `block` (Hindernis) — keine Tiles. Polygone sind benennbar und haben optionale Flags.
+- **Polygon-Flags**: `climb` (Kletterwand — nur Figuren mit Kletter-Fähigkeit, Bewegung 0,55×), `acro` (Akrobatik-Fläche — nur Akrobaten, Bewegung 1,6×).
+- **Übergänge**: `jump` (Akrobatik-Sprung im Bogen von Fläche A nach B, nur Akrobaten) und `door` (Tür/Geheimgang, teleportiert alle Figuren). Beide sind normale Kanten im Navigationsgraph.
+- **Navigation**: Sichtbarkeitsgraph (Polygon-Ecken + Übergangsknoten), Dijkstra-Pfadsuche, String-Pulling; pro Figur ein eigener Graph abhängig von ihren Fähigkeiten.
+- **Map-Editor**: Polygone zeichnen, benennen, Flags setzen, verschieben, Ecken editieren (Doppelklick auf Kante fügt Punkt ein), Wachen/Marker/Übergänge ziehen, JSON-Export/-Import, Hintergrundbild laden.
+- **Stealth-Mechanik**: Sichtkegel der Wachen, Versteck-Mechanik, Pfeifen, Schleichen, K.o. von hinten, Alarmausbreitung. Wachen benutzen keine Übergänge und keine Flag-Flächen.
 - **Kamera**: Zoom (Mausrad, 0,3–1,6×), Follow-Modus, freies Scrollen.
+
+## Figuren und Fähigkeiten
+
+| Figur | Fähigkeit | Besonderheit |
+|---|---|---|
+| Robin | Klettern | betritt `climb`-Flächen (langsam) |
+| Little John | — | K.o. aus der Distanz, aber keine Flag-Flächen |
+| Marian | Akrobatik | betritt `acro`-Flächen (schnell), nutzt Sprung-Übergänge |
 
 ## Workflow: KI-generierte Karte
 
-1. Im Editor Polygone zeichnen/anordnen und benennen (Eingabefeld unter „Polygone“).
-2. „JSON exportieren“ und das JSON an den Assistenten übergeben → erzeugt daraus ein gemaltes Kartenbild, das sich ungefähr an das Layout und die Namen hält.
-3. Bild entweder lokal als `public/map.jpg` speichern (wird beim Start automatisch geladen) oder im Editor über „Hintergrund laden“ einlegen.
-4. Polygone über das Bild ziehen, bis alles passt; „JSON exportieren“ sichert das Ergebnis.
+1. Im Editor Polygone zeichnen/anordnen und benennen (Eingabefeld unter „Polygone").
+2. „JSON exportieren" und das JSON an den Assistenten übergeben → erzeugt daraus ein gemaltes Kartenbild, das sich ungefähr an das Layout und die Namen hält.
+3. Bild entweder lokal als `public/map.jpg` speichern (wird beim Start automatisch geladen) oder im Editor über „Hintergrund laden" einlegen.
+4. Polygone über das Bild ziehen, bis alles passt; „JSON exportieren" sichert das Ergebnis.
 
 ## Entwicklung
 
@@ -74,19 +84,23 @@ Editor: Klick = Punkt, Doppelklick = Polygon schließen / Punkt auf Kante einfü
 {
   "world": { "w": 1536, "h": 864 },
   "layers": {
-    "walk": [{ "name": "Dorf", "pts": [{ "x": 100, "y": 200 }] }],
+    "walk": [{ "name": "Marktdach", "pts": [{ "x": 100, "y": 200 }], "flags": ["acro"] }],
     "hide": [],
     "block": []
   },
   "markers": {
     "escape": { "x": 0, "y": 0, "r": 50 },
     "gold": { "x": 0, "y": 0 },
-    "guards": [{ "type": "pacer", "a": { "x": 0, "y": 0 }, "b": { "x": 0, "y": 0 } }]
+    "guards": [{ "type": "pacer", "a": { "x": 0, "y": 0 }, "b": { "x": 0, "y": 0 } }],
+    "transitions": [
+      { "type": "jump", "name": "Dachsprung", "from": { "x": 0, "y": 0 }, "to": { "x": 0, "y": 0 } },
+      { "type": "door", "name": "Geheimgang", "from": { "x": 0, "y": 0 }, "to": { "x": 0, "y": 0 } }
+    ]
   }
 }
 ```
 
-Ältere Karten ohne `name`/`pts` (reine Punktelisten) werden beim Import automatisch konvertiert.
+Gültige Flags: `climb` (Kletterwand), `acro` (Akrobatik). Übergänge: `jump` nur für Akrobaten, `door` für alle. Ältere Karten ohne `name`/`pts`/`flags` werden beim Import automatisch konvertiert.
 
 ## Hinweise
 
