@@ -68,6 +68,26 @@ function weaponName(w) {
   return w ? WEAPON_LISTS[w.cat]?.[w.tier] ?? "?" : "?";
 }
 
+// Kampffertigkeit: skaliert verursachten Schaden (Figuren) bzw. Gegenschaden (Wachen)
+const SKILLS = {
+  green: { label: "Unerfahren", mult: 0.7, pips: 1 },
+  regular: { label: "Durchschnittlich", mult: 1, pips: 2 },
+  veteran: { label: "Erfahren", mult: 1.25, pips: 3 },
+  elite: { label: "Elite", mult: 1.45, pips: 4 },
+};
+
+function normSkill(s) {
+  return s && SKILLS[s] ? s : null;
+}
+
+function randSkill() {
+  const r = Math.random();
+  if (r < 0.3) return "green";
+  if (r < 0.7) return "regular";
+  if (r < 0.9) return "veteran";
+  return "elite";
+}
+
 function normWeapon(w) {
   if (!w) return null;
   if (typeof w === "string") {
@@ -107,7 +127,7 @@ function processCombatTick(g, notify) {
     let sum = 0;
     for (const ci of guard.engagedChars) {
       const c = g.chars[ci];
-      sum += COMBAT.baseDmg * matchupMod(c.weapon.cat, guard.weapon.cat).dmg * WEAPON_TIERS[c.weapon.tier].dmg;
+      sum += COMBAT.baseDmg * matchupMod(c.weapon.cat, guard.weapon.cat).dmg * WEAPON_TIERS[c.weapon.tier].dmg * SKILLS[c.skill].mult;
     }
     const combo = 1 + 0.5 * Math.pow(k - 1, COMBAT.comboExp);
     guard.hp -= (sum / k) * combo;
@@ -153,7 +173,7 @@ function processCombatTick(g, notify) {
           Math.max(1, c.engaged.length);
       }
       const back =
-        (COMBAT.baseDmg * matchupMod(guard.weapon.cat, c.weapon.cat).dmg * gTier.dmg * COMBAT.counterFactor) /
+        (COMBAT.baseDmg * matchupMod(guard.weapon.cat, c.weapon.cat).dmg * gTier.dmg * SKILLS[guard.skill].mult * COMBAT.counterFactor) /
         Math.pow(k, 0.7);
       let drain = (COMBAT.drainBase * Math.pow(n * 0.85, COMBAT.drainExp) * drainSum) / Math.pow(allies, COMBAT.allyDiv);
       drain = Math.max(drain, COMBAT.drainBase * Math.pow(n / allies, COMBAT.drainMinExp));
@@ -463,9 +483,9 @@ function defaultMap(w, h) {
       escape: { x: villageC.x, y: villageC.y, r: 0.16 * h * 0.85 },
       gold: { x: plazaC.x, y: plazaC.y - 0.14 * h * 0.35 },
       guards: [
-        { type: "pacer", a: roadAt(0.12), b: roadAt(0.4), weapon: { cat: "spear", tier: "std" } },
-        { type: "pacer", a: roadAt(0.56), b: roadAt(0.84), weapon: { cat: "sword", tier: "heavy" } },
-        { type: "sentry", post: sentryPost, look: roadAt(0.55), weapon: { cat: "heavy", tier: "heavy" } },
+        { type: "pacer", a: roadAt(0.12), b: roadAt(0.4), weapon: { cat: "spear", tier: "std" }, skill: "green" },
+        { type: "pacer", a: roadAt(0.56), b: roadAt(0.84), weapon: { cat: "sword", tier: "heavy" }, skill: "regular" },
+        { type: "sentry", post: sentryPost, look: roadAt(0.55), weapon: { cat: "heavy", tier: "heavy" }, skill: "elite" },
       ],
       transitions: [
         { type: "jump", name: "Dachsprung", from: roofAC, to: roofBC },
@@ -580,9 +600,9 @@ function newGame(map) {
     { x: -10, y: 32 },
   ];
   const charDefs = [
-    { id: "robin", name: "Robin", role: "Ausgewogen · klettert · Einhänder", color: "#2f7d32", speed: 132, sneakSpeed: 72, koRange: 46, canClimb: true, stamina: 100, weapon: { cat: "sword", tier: "std" } },
-    { id: "john", name: "Little John", role: "Bruiser · Morgenstern", color: "#6b4f2a", speed: 118, sneakSpeed: 64, koRange: 72, stamina: 120, weapon: { cat: "heavy", tier: "heavy" } },
-    { id: "marian", name: "Marian", role: "Schnell · Akrobatin · Dolch", color: "#3b6fa0", speed: 152, sneakSpeed: 82, koRange: 44, canAcro: true, stamina: 80, weapon: { cat: "sword", tier: "light" } },
+    { id: "robin", name: "Robin", role: "Erfahrener Krieger · klettert · Einhänder", color: "#2f7d32", speed: 132, sneakSpeed: 72, koRange: 46, canClimb: true, stamina: 100, skill: "veteran", weapon: { cat: "sword", tier: "std" } },
+    { id: "john", name: "Little John", role: "Erfahrener Krieger · Morgenstern", color: "#6b4f2a", speed: 118, sneakSpeed: 64, koRange: 72, stamina: 120, skill: "veteran", weapon: { cat: "heavy", tier: "heavy" } },
+    { id: "marian", name: "Marian", role: "Kämpferin light · Akrobatin · Dolch", color: "#3b6fa0", speed: 152, sneakSpeed: 82, koRange: 44, canAcro: true, stamina: 80, skill: "green", weapon: { cat: "sword", tier: "light" } },
   ];
   const chars = charDefs.map((cd, i) => {
     const raw = { x: esc.x + startOffsets[i].x, y: esc.y + startOffsets[i].y };
@@ -647,6 +667,7 @@ function newGame(map) {
       speed: pacer ? 58 : 0,
       hp: COMBAT.guardHp,
       weapon: normWeapon(gd.weapon) ?? randWeapon(),
+      skill: normSkill(gd.skill) ?? randSkill(),
       engagedChars: [],
     };
   });
@@ -1066,6 +1087,16 @@ function drawGuard(ctx, guard, t) {
     ctx.arc(guard.x, guard.y - 10, 23, 0, Math.PI * 2);
     ctx.stroke();
   }
+  // Skill-Pips über dem Helm (1=Rookie bis 4=Elite)
+  const sk = guard.skill && SKILLS[guard.skill];
+  if (sk) {
+    for (let i = 0; i < sk.pips; i++) {
+      ctx.fillStyle = guard.skill === "elite" ? "#f87171" : guard.skill === "veteran" ? "#fbbf24" : "#94a3b8";
+      ctx.beginPath();
+      ctx.arc(guard.x - 7 + i * 5, guard.y - 27 - (guard.hp < COMBAT.guardHp ? 6 : 0), 2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
   const fx = Math.cos(guard.facing);
   const fy = Math.sin(guard.facing);
   ctx.strokeStyle = "#f8fafc";
@@ -1142,6 +1173,16 @@ function drawChar(ctx, c, selected, t) {
     if (c.weapon && WEAPONS[c.weapon.cat]) {
       ctx.fillStyle = WEAPONS[c.weapon.cat].color;
       ctx.fillRect(p.x - 14, p.y - 24, 7, 3);
+    }
+    // Skill-Pips neben dem Ausdauerbalken
+    const csk = c.skill && SKILLS[c.skill];
+    if (csk) {
+      ctx.fillStyle = c.skill === "veteran" ? "#fbbf24" : "#94a3b8";
+      for (let i = 0; i < csk.pips; i++) {
+        ctx.beginPath();
+        ctx.arc(p.x + 8 + i * 4, p.y - 27, 1.5, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
   }
 }
@@ -1458,7 +1499,7 @@ export default function App() {
   const [mode, setMode] = useState("play");
   const [layer, setLayer] = useState("walk");
   const [imgOk, setImgOk] = useState(false);
-  const [editInfo, setEditInfo] = useState({ drawing: 0, selected: false, selectedGuard: null, selectedTrans: null, name: "", flags: [], guardWeapon: null });
+  const [editInfo, setEditInfo] = useState({ drawing: 0, selected: false, selectedGuard: null, selectedTrans: null, name: "", flags: [], guardWeapon: null, guardSkill: null });
   const [jsonText, setJsonText] = useState("");
   const [ui, setUi] = useState({
     selected: 0,
@@ -1497,6 +1538,10 @@ export default function App() {
       guardWeapon:
         e.selectedGuard !== null && mapRef.current.markers.guards[e.selectedGuard]
           ? mapRef.current.markers.guards[e.selectedGuard].weapon ?? null
+          : null,
+      guardSkill:
+        e.selectedGuard !== null && mapRef.current.markers.guards[e.selectedGuard]
+          ? mapRef.current.markers.guards[e.selectedGuard].skill ?? null
           : null,
     });
   }, []);
@@ -1629,6 +1674,7 @@ export default function App() {
       a: { x: cx - 90, y: cy },
       b: { x: cx + 90, y: cy },
       weapon: randWeapon(),
+      skill: randSkill(),
     });
   }, []);
 
@@ -1641,6 +1687,7 @@ export default function App() {
       post: { x: cx, y: cy },
       look: { x: cx + 140, y: cy + 60 },
       weapon: randWeapon(),
+      skill: randSkill(),
     });
   }, []);
 
@@ -1662,6 +1709,14 @@ export default function App() {
     const w = normWeapon(gd.weapon) ?? { cat: "sword", tier: "std" };
     gd.weapon = part === "cat" ? { ...w, cat: value } : { ...w, tier: value };
     setEditInfo((p) => ({ ...p, guardWeapon: gd.weapon }));
+  }, []);
+
+  const setGuardSkill = useCallback((value) => {
+    const ed = editRef.current;
+    if (ed.selectedGuard === null) return;
+    const gd = mapRef.current.markers.guards[ed.selectedGuard];
+    gd.skill = normSkill(value) ?? "regular";
+    setEditInfo((p) => ({ ...p, guardSkill: gd.skill }));
   }, []);
 
   const addJump = useCallback(() => {
@@ -1747,6 +1802,7 @@ export default function App() {
           guards: (parsed.markers.guards ?? []).map((gd) => ({
             ...gd,
             weapon: normWeapon(gd.weapon) ?? randWeapon(),
+            skill: normSkill(gd.skill) ?? randSkill(),
           })),
           transitions: parsed.markers.transitions ?? [],
         },
@@ -2401,7 +2457,8 @@ export default function App() {
                   <p>S: Schleichen · Q: Pfeifen · R: Neustart</p>
                   <p className="mt-1 text-stone-400">
                     Waffen-Dreieck: Schwert schlägt Schwer, Schwer schlägt Speer, Speer schlägt Schwert (Ringfarbe).
-                    Ringstärke = Stufe. 3 Gegner sind knapp machbar, 4 nicht – Kampf erzeugt Lärm (rote Ringe).
+                    Ringstärke = Stufe, Punkte über dem Helm = Kampffertigkeit (1–4). Robin und John sind erfahrene
+                    Krieger, Marian nicht – 3 Gegner sind knapp machbar, 4 nicht, Kampf erzeugt Lärm (rote Ringe).
                   </p>
                 </div>
               </>
@@ -2551,6 +2608,24 @@ export default function App() {
                       <p className="w-full text-[10px] text-stone-500">
                         Auswahl: {editInfo.guardWeapon ? weaponName(editInfo.guardWeapon) : "—"} · Dreieck: Schwert
                         &gt; Schwer &gt; Speer &gt; Schwert
+                      </p>
+                      <label className="flex flex-col gap-1 text-[10px] text-stone-400">
+                        Kampffertigkeit
+                        <select
+                          value={editInfo.guardSkill ?? "regular"}
+                          onChange={(e) => setGuardSkill(e.target.value)}
+                          className="rounded border border-stone-700 bg-stone-950 px-1.5 py-1 text-xs text-stone-200"
+                        >
+                          {Object.entries(SKILLS).map(([key, s]) => (
+                            <option key={key} value={key}>
+                              {s.label} (×{s.mult})
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <p className="w-full text-[10px] text-stone-500">
+                        Fertigkeit: {editInfo.guardSkill ? SKILLS[editInfo.guardSkill].label : "—"} · im Spiel als
+                        Punkte über dem Helm (1–4)
                       </p>
                     </div>
                   )}
