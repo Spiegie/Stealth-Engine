@@ -1,3 +1,4 @@
+
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -28,6 +29,149 @@ const NOISE_RADIUS = 240;
 const WHISTLE_RADIUS = 430;
 const ALARM_SPREAD = 300;
 const CATCH_DIST = 20;
+
+// ---------- Kampf ----------
+const COMBAT = {
+  tick: 1.5, // Sekunden pro Kampfrunde
+  baseDmg: 26,
+  guardHp: 50,
+  drainBase: 5,
+  drainExp: 1.5,
+  counterFactor: 0.22, // Gegenschaden der Wache auf die Ausdauer
+  comboExp: 0.7, // Schadensbonus bei mehreren Angreifern (sublinear)
+  allyDiv: 0.8, // Rücken-an-Rücken: Ausdauerkosten / allies^allyDiv
+  drainMinExp: 1.1, // Untergrenze des Ausdauerverbrauchs (Masse-Schutz)
+  flankRange: 40,
+  disengageCost: 25,
+  disengageSlow: 0.7,
+  noiseRadius: 300,
+  engageDist: 30,
+  enemyCap: (k) => Math.min(2 + 2 * k, 6),
+};
+const WEAPONS = {
+  sword: { beats: "heavy", label: "Schwert", color: "#cbd5e1" },
+  spear: { beats: "sword", label: "Speer", color: "#4ade80" },
+  heavy: { beats: "spear", label: "Schwer", color: "#fb923c" },
+};
+const WEAPON_TIERS = {
+  light: { label: "Leicht", dmg: 0.7, drain: 0.75, move: 1.1, ko: 0.8 },
+  std: { label: "Standard", dmg: 1, drain: 1, move: 1, ko: 1 },
+  heavy: { label: "Schwer", dmg: 1.35, drain: 1.3, move: 0.85, ko: 0.7 },
+};
+const WEAPON_LISTS = {
+  sword: { light: "Dolch", std: "Einhänder", heavy: "Zweihänder" },
+  spear: { light: "Mistgabel", std: "Speer", heavy: "Hellebarde" },
+  heavy: { light: "Knüppel", std: "Axt", heavy: "Morgenstern" },
+};
+
+function weaponName(w) {
+  return w ? WEAPON_LISTS[w.cat]?.[w.tier] ?? "?" : "?";
+}
+
+function normWeapon(w) {
+  if (!w) return null;
+  if (typeof w === "string") {
+    const cat = w === "axe" ? "heavy" : w;
+    return WEAPONS[cat] ? { cat, tier: "std" } : null;
+  }
+  if (w.cat && w.tier && WEAPONS[w.cat] && WEAPON_TIERS[w.tier]) return { cat: w.cat, tier: w.tier };
+  return null;
+}
+
+function randWeapon() {
+  const cats = ["sword", "spear", "heavy"];
+  const r = Math.random();
+  const tier = r < 0.6 ? "std" : r < 0.85 ? "light" : "heavy";
+  return { cat: cats[Math.floor(Math.random() * 3)], tier };
+}
+
+function matchupMod(a, b) {
+  if (a === b) return { dmg: 1, drain: 1 };
+  if (WEAPONS[a].beats === b) return { dmg: 1.5, drain: 0.85 };
+  return { dmg: 0.6, drain: 1.15 };
+}
+
+function processCombatTick(g, notify) {
+  // Bindungen aufräumen
+  for (const guard of g.guards) {
+    if (guard.engagedChars.length === 0) continue;
+    guard.engagedChars = guard.engagedChars.filter((ci) => {
+      const c = g.chars[ci];
+      return c && !c.caught && c.engaged.includes(guard.id);
+    });
+  }
+  const fighting = g.guards.filter((gu) => gu.engagedChars.length > 0);
+  for (const guard of fighting) {
+    const k = guard.engagedChars.length;
+    // Schaden an die Wache (Gruppenbonus sublinear)
+    let sum = 0;
+    for (const ci of guard.engagedChars) {
+      const c = g.chars[ci];
+      sum += COMBAT.baseDmg * matchupMod(c.weapon.cat, guard.weapon.cat).dmg * WEAPON_TIERS[c.weapon.tier].dmg;
+    }
+    const combo = 1 + 0.5 * Math.pow(k - 1, COMBAT.comboExp);
+    guard.hp -= (sum / k) * combo;
+    // Kampflärm alarmiert die Umgebung
+    g.combatFx.push({ x: guard.x, y: guard.y, t: 0 });
+    for (const other of g.guards) {
+      if (other === guard || other.state === "knocked" || other.engagedChars.length > 0) continue;
+      if (Math.hypot(other.x - guard.x, other.y - guard.y) < COMBAT.noiseRadius) {
+        other.state = "alert";
+        other.lastSeen = { x: guard.x, y: guard.y };
+        other.lostSightAt = g.time;
+      }
+    }
+    if (guard.hp <= 0) {
+      guard.state = "knocked";
+      guard.path = [];
+      guard.engagedChars = [];
+      g.knocked++;
+      for (const c of g.chars) {
+        c.engaged = c.engaged.filter((id) => id !== guard.id);
+        if (c.attackTarget === guard.id) c.attackTarget = null;
+      }
+      notify("Gegner im Kampf bezwungen!");
+      continue;
+    }
+    // Gegenschaden + Ausdauerkosten pro beteiligter Figur
+    const gTier = WEAPON_TIERS[guard.weapon.tier];
+    for (const ci of guard.engagedChars) {
+      const c = g.chars[ci];
+      const n = c.engaged.length;
+      const allies =
+        1 +
+        g.chars.filter(
+          (o) =>
+            o !== c && !o.caught && o.engaged.length > 0 && Math.hypot(o.x - c.x, o.y - c.y) < COMBAT.flankRange,
+        ).length;
+      let drainSum = 0;
+      for (const gid of c.engaged) {
+        const gu = g.guards[gid];
+        if (!gu || gu.state === "knocked") continue;
+        drainSum +=
+          (matchupMod(c.weapon.cat, gu.weapon.cat).drain * WEAPON_TIERS[gu.weapon.tier].drain) /
+          Math.max(1, c.engaged.length);
+      }
+      const back =
+        (COMBAT.baseDmg * matchupMod(guard.weapon.cat, c.weapon.cat).dmg * gTier.dmg * COMBAT.counterFactor) /
+        Math.pow(k, 0.7);
+      let drain = (COMBAT.drainBase * Math.pow(n * 0.85, COMBAT.drainExp) * drainSum) / Math.pow(allies, COMBAT.allyDiv);
+      drain = Math.max(drain, COMBAT.drainBase * Math.pow(n / allies, COMBAT.drainMinExp));
+      c.stamina -= drain + back;
+      if (c.stamina <= 0) {
+        c.stamina = 0;
+        c.caught = true;
+        for (const gid of c.engaged) {
+          const gu = g.guards[gid];
+          if (gu) gu.engagedChars = gu.engagedChars.filter((x) => x !== ci);
+        }
+        c.engaged = [];
+        g.status = "lost";
+        notify(`${c.name} wurde im Kampf überwältigt!`);
+      }
+    }
+  }
+}
 
 // ---------- Geometrie ----------
 
@@ -319,9 +463,9 @@ function defaultMap(w, h) {
       escape: { x: villageC.x, y: villageC.y, r: 0.16 * h * 0.85 },
       gold: { x: plazaC.x, y: plazaC.y - 0.14 * h * 0.35 },
       guards: [
-        { type: "pacer", a: roadAt(0.12), b: roadAt(0.4) },
-        { type: "pacer", a: roadAt(0.56), b: roadAt(0.84) },
-        { type: "sentry", post: sentryPost, look: roadAt(0.55) },
+        { type: "pacer", a: roadAt(0.12), b: roadAt(0.4), weapon: { cat: "spear", tier: "std" } },
+        { type: "pacer", a: roadAt(0.56), b: roadAt(0.84), weapon: { cat: "sword", tier: "heavy" } },
+        { type: "sentry", post: sentryPost, look: roadAt(0.55), weapon: { cat: "heavy", tier: "heavy" } },
       ],
       transitions: [
         { type: "jump", name: "Dachsprung", from: roofAC, to: roofBC },
@@ -436,9 +580,9 @@ function newGame(map) {
     { x: -10, y: 32 },
   ];
   const charDefs = [
-    { id: "robin", name: "Robin", role: "Ausgewogen · klettert", color: "#2f7d32", speed: 132, sneakSpeed: 72, koRange: 46, canClimb: true },
-    { id: "john", name: "Little John", role: "K.o. aus der Distanz", color: "#6b4f2a", speed: 118, sneakSpeed: 64, koRange: 72 },
-    { id: "marian", name: "Marian", role: "Schnell · Akrobatin", color: "#3b6fa0", speed: 152, sneakSpeed: 82, koRange: 44, canAcro: true },
+    { id: "robin", name: "Robin", role: "Ausgewogen · klettert · Einhänder", color: "#2f7d32", speed: 132, sneakSpeed: 72, koRange: 46, canClimb: true, stamina: 100, weapon: { cat: "sword", tier: "std" } },
+    { id: "john", name: "Little John", role: "Bruiser · Morgenstern", color: "#6b4f2a", speed: 118, sneakSpeed: 64, koRange: 72, stamina: 120, weapon: { cat: "heavy", tier: "heavy" } },
+    { id: "marian", name: "Marian", role: "Schnell · Akrobatin · Dolch", color: "#3b6fa0", speed: 152, sneakSpeed: 82, koRange: 44, canAcro: true, stamina: 80, weapon: { cat: "sword", tier: "light" } },
   ];
   const chars = charDefs.map((cd, i) => {
     const raw = { x: esc.x + startOffsets[i].x, y: esc.y + startOffsets[i].y };
@@ -452,6 +596,11 @@ function newGame(map) {
       koTarget: null,
       caught: false,
       jump: null,
+      maxStamina: cd.stamina,
+      stamina: cd.stamina,
+      engaged: [],
+      attackTarget: null,
+      disengageUntil: 0,
     };
   });
   const charNavs = {};
@@ -496,6 +645,9 @@ function newGame(map) {
       distractCooldown: 4,
       baseFacing: Math.atan2(look.y - post.y, look.x - post.x),
       speed: pacer ? 58 : 0,
+      hp: COMBAT.guardHp,
+      weapon: normWeapon(gd.weapon) ?? randWeapon(),
+      engagedChars: [],
     };
   });
 
@@ -512,6 +664,8 @@ function newGame(map) {
     status: "playing",
     time: 0,
     noiseAt: 0,
+    combatAcc: 0,
+    combatFx: [],
     whistleAt: -99,
     whistleFx: null,
     showWalk: true,
@@ -535,10 +689,21 @@ function guardSees(g, guard, pos, rangeMult = 1) {
 function updateGame(g, dt, notify) {
   const map = g.map;
 
-  for (const c of g.chars) {
+  // Kampfrunde (Tick) abarbeiten
+  g.combatAcc += dt;
+  if (g.combatAcc >= COMBAT.tick) {
+    g.combatAcc -= COMBAT.tick;
+    processCombatTick(g, notify);
+  }
+
+  for (let ci = 0; ci < g.chars.length; ci++) {
+    const c = g.chars[ci];
     if (c.caught) continue;
-    const base = g.sneak ? c.sneakSpeed : c.speed;
-    const moving = moveAlongPath(c, base * speedMult(map, c), dt, map);
+    const bound = c.engaged.length > 0;
+    const retreating = g.time < c.disengageUntil;
+    let base = (g.sneak ? c.sneakSpeed : c.speed) * WEAPON_TIERS[c.weapon.tier].move;
+    if (retreating) base *= COMBAT.disengageSlow;
+    const moving = bound && !retreating ? false : moveAlongPath(c, base * speedMult(map, c), dt, map);
 
     if (moving && !g.sneak && g.time - g.noiseAt > 0.4) {
       g.noiseAt = g.time;
@@ -555,10 +720,10 @@ function updateGame(g, dt, notify) {
 
     if (c.koTarget !== null) {
       const guard = g.guards[c.koTarget];
-      if (!guard || guard.state === "knocked") c.koTarget = null;
+      if (!guard || guard.state === "knocked" || guard.engagedChars.length > 0) c.koTarget = null;
       else {
         const dist = Math.hypot(guard.x - c.x, guard.y - c.y);
-        if (dist <= c.koRange) {
+        if (dist <= c.koRange * WEAPON_TIERS[c.weapon.tier].ko) {
           if (guard.state !== "alert") {
             guard.state = "knocked";
             guard.path = [];
@@ -567,6 +732,27 @@ function updateGame(g, dt, notify) {
             notify("Wache ausgeschaltet.");
           }
           c.koTarget = null;
+        }
+      }
+    }
+
+    // Kampf-Angriff: auf die Zielwache zulaufen und binden
+    if (c.attackTarget !== null) {
+      const guard = g.guards[c.attackTarget];
+      if (!guard || guard.state === "knocked") c.attackTarget = null;
+      else {
+        const dist = Math.hypot(guard.x - c.x, guard.y - c.y);
+        if (dist <= COMBAT.engageDist) {
+          if (!c.engaged.includes(guard.id)) c.engaged.push(guard.id);
+          if (!guard.engagedChars.includes(ci)) guard.engagedChars.push(ci);
+          guard.state = "alert";
+          guard.lastSeen = { x: c.x, y: c.y };
+          guard.lostSightAt = g.time;
+          guard.path = [];
+          c.path = [];
+          c.attackTarget = null;
+          c.koTarget = null;
+          notify(`${c.name} nimmt den Kampf auf (${weaponName(c.weapon)} gegen ${weaponName(guard.weapon)})!`);
         }
       }
     }
@@ -590,6 +776,40 @@ function updateGame(g, dt, notify) {
 
   for (const guard of g.guards) {
     if (guard.state === "knocked") continue;
+
+    // Gebundene Wache: kämpft, folgt nur ihrem Gegner
+    if (guard.engagedChars.length > 0) {
+      const c0 = g.chars[guard.engagedChars[0]];
+      if (!c0 || c0.caught) {
+        guard.engagedChars = [];
+      } else {
+        guard.state = "alert";
+        guard.lastSeen = { x: c0.x, y: c0.y };
+        guard.lostSightAt = g.time;
+        const d = Math.hypot(guard.x - c0.x, guard.y - c0.y);
+        guard.facing = Math.atan2(c0.y - guard.y, c0.x - guard.x);
+        if (d > CATCH_DIST) {
+          const sp = 62 * dt;
+          guard.x += ((c0.x - guard.x) / d) * sp;
+          guard.y += ((c0.y - guard.y) / d) * sp;
+        }
+        continue;
+      }
+    }
+
+    // Alarmierte Wache schließt sich einem Kampf in der Nähe an
+    if (guard.state === "alert" && guard.engagedChars.length === 0) {
+      for (let ci = 0; ci < g.chars.length; ci++) {
+        const c = g.chars[ci];
+        if (c.caught || c.engaged.length === 0) continue;
+        if (Math.hypot(guard.x - c.x, guard.y - c.y) < COMBAT.engageDist + 10) {
+          guard.engagedChars.push(ci);
+          c.engaged.push(guard.id);
+          notify("Eine weitere Wache schließt sich dem Kampf an!");
+          break;
+        }
+      }
+    }
 
     let seen = null;
     for (const c of activeChars) {
@@ -693,6 +913,7 @@ function updateGame(g, dt, notify) {
 
     if (guard.state === "alert") {
       for (const c of activeChars) {
+        if (guard.engagedChars.includes(g.chars.indexOf(c))) continue;
         if (Math.hypot(guard.x - c.x, guard.y - c.y) < CATCH_DIST) {
           c.caught = true;
           g.status = "lost";
@@ -814,6 +1035,37 @@ function drawGuard(ctx, guard, t) {
   ctx.beginPath();
   ctx.arc(guard.x, guard.y - 17, 6, 0, Math.PI * 2);
   ctx.fill();
+  // Waffenring: Farbe = Kategorie, Stärke = Stufe
+  if (guard.weapon && WEAPONS[guard.weapon.cat]) {
+    ctx.strokeStyle = WEAPONS[guard.weapon.cat].color;
+    ctx.lineWidth = guard.weapon.tier === "light" ? 1.5 : guard.weapon.tier === "heavy" ? 4 : 2.5;
+    ctx.beginPath();
+    ctx.arc(guard.x, guard.y - 10, 15, 0, Math.PI * 2);
+    ctx.stroke();
+    if (guard.weapon.tier === "heavy") {
+      ctx.setLineDash([3, 3]);
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(guard.x, guard.y - 10, 19, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+  }
+  // HP-Balken (nur wenn beschädigt)
+  if (guard.hp !== undefined && guard.hp < COMBAT.guardHp) {
+    ctx.fillStyle = "#00000088";
+    ctx.fillRect(guard.x - 14, guard.y - 30, 28, 4);
+    ctx.fillStyle = "#ef4444";
+    ctx.fillRect(guard.x - 14, guard.y - 30, (28 * Math.max(0, guard.hp)) / COMBAT.guardHp, 4);
+  }
+  // Kampf-Indikator
+  if (guard.engagedChars && guard.engagedChars.length > 0) {
+    ctx.strokeStyle = `rgba(239,68,68,${0.5 + Math.sin(t * 8) * 0.4})`;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(guard.x, guard.y - 10, 23, 0, Math.PI * 2);
+    ctx.stroke();
+  }
   const fx = Math.cos(guard.facing);
   const fy = Math.sin(guard.facing);
   ctx.strokeStyle = "#f8fafc";
@@ -880,6 +1132,18 @@ function drawChar(ctx, c, selected, t) {
   ctx.beginPath();
   ctx.arc(p.x, p.y - 12, 7, Math.PI, Math.PI * 2);
   ctx.fill();
+  // Ausdauerbalken + Waffenmarkierung
+  if (c.stamina !== undefined && (c.stamina < c.maxStamina || (c.engaged && c.engaged.length > 0))) {
+    const frac = Math.max(0, c.stamina / c.maxStamina);
+    ctx.fillStyle = "#00000088";
+    ctx.fillRect(p.x - 14, p.y - 30, 28, 4);
+    ctx.fillStyle = frac > 0.5 ? "#34d399" : frac > 0.25 ? "#fbbf24" : "#ef4444";
+    ctx.fillRect(p.x - 14, p.y - 30, 28 * frac, 4);
+    if (c.weapon && WEAPONS[c.weapon.cat]) {
+      ctx.fillStyle = WEAPONS[c.weapon.cat].color;
+      ctx.fillRect(p.x - 14, p.y - 24, 7, 3);
+    }
+  }
 }
 
 function drawPlay(ctx, g, t, showWalk) {
@@ -985,6 +1249,16 @@ function drawPlay(ctx, g, t, showWalk) {
     ctx.lineWidth = 3;
     ctx.beginPath();
     ctx.arc(g.whistleFx.x, g.whistleFx.y, r, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
+  // Kampflärm
+  for (const fx of g.combatFx ?? []) {
+    const r = fx.t * COMBAT.noiseRadius;
+    ctx.strokeStyle = `rgba(239,68,68,${Math.max(0, 1 - fx.t / 1.2)})`;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(fx.x, fx.y, r, 0, Math.PI * 2);
     ctx.stroke();
   }
 
@@ -1184,7 +1458,7 @@ export default function App() {
   const [mode, setMode] = useState("play");
   const [layer, setLayer] = useState("walk");
   const [imgOk, setImgOk] = useState(false);
-  const [editInfo, setEditInfo] = useState({ drawing: 0, selected: false, selectedGuard: null, selectedTrans: null, name: "", flags: [] });
+  const [editInfo, setEditInfo] = useState({ drawing: 0, selected: false, selectedGuard: null, selectedTrans: null, name: "", flags: [], guardWeapon: null });
   const [jsonText, setJsonText] = useState("");
   const [ui, setUi] = useState({
     selected: 0,
@@ -1197,6 +1471,8 @@ export default function App() {
     hidden: true,
     follow: true,
     showWalk: true,
+    stams: "100,120,80",
+    fights: 0,
   });
   const [message, setMessage] = useState(null);
 
@@ -1218,6 +1494,10 @@ export default function App() {
       selectedTrans: e.selectedTrans,
       name: selPoly ? selPoly.name ?? "" : "",
       flags: selPoly ? selPoly.flags ?? [] : [],
+      guardWeapon:
+        e.selectedGuard !== null && mapRef.current.markers.guards[e.selectedGuard]
+          ? mapRef.current.markers.guards[e.selectedGuard].weapon ?? null
+          : null,
     });
   }, []);
 
@@ -1344,14 +1624,24 @@ export default function App() {
     const c = camRef.current;
     const cx = c.x + VIEW_W / (2 * c.z);
     const cy = c.y + VIEW_H / (2 * c.z);
-    mapRef.current.markers.guards.push({ type: "pacer", a: { x: cx - 90, y: cy }, b: { x: cx + 90, y: cy } });
+    mapRef.current.markers.guards.push({
+      type: "pacer",
+      a: { x: cx - 90, y: cy },
+      b: { x: cx + 90, y: cy },
+      weapon: randWeapon(),
+    });
   }, []);
 
   const addSentry = useCallback(() => {
     const c = camRef.current;
     const cx = c.x + VIEW_W / (2 * c.z);
     const cy = c.y + VIEW_H / (2 * c.z);
-    mapRef.current.markers.guards.push({ type: "sentry", post: { x: cx, y: cy }, look: { x: cx + 140, y: cy + 60 } });
+    mapRef.current.markers.guards.push({
+      type: "sentry",
+      post: { x: cx, y: cy },
+      look: { x: cx + 140, y: cy + 60 },
+      weapon: randWeapon(),
+    });
   }, []);
 
   const toggleFlag = useCallback((flag, on) => {
@@ -1363,6 +1653,15 @@ export default function App() {
     else flags.delete(flag);
     poly.flags = Array.from(flags);
     setEditInfo((p) => ({ ...p, flags: poly.flags }));
+  }, []);
+
+  const setGuardWeapon = useCallback((part, value) => {
+    const ed = editRef.current;
+    if (ed.selectedGuard === null) return;
+    const gd = mapRef.current.markers.guards[ed.selectedGuard];
+    const w = normWeapon(gd.weapon) ?? { cat: "sword", tier: "std" };
+    gd.weapon = part === "cat" ? { ...w, cat: value } : { ...w, tier: value };
+    setEditInfo((p) => ({ ...p, guardWeapon: gd.weapon }));
   }, []);
 
   const addJump = useCallback(() => {
@@ -1443,8 +1742,15 @@ export default function App() {
           hide: (parsed.layers.hide ?? []).map(normPoly),
           block: (parsed.layers.block ?? []).map(normPoly),
         },
+        markers: {
+          ...parsed.markers,
+          guards: (parsed.markers.guards ?? []).map((gd) => ({
+            ...gd,
+            weapon: normWeapon(gd.weapon) ?? randWeapon(),
+          })),
+          transitions: parsed.markers.transitions ?? [],
+        },
       };
-      if (!mapRef.current.markers.transitions) mapRef.current.markers.transitions = [];
       worldDims.current = parsed.world ?? worldDims.current;
       pushMessage("Karte importiert.");
     } catch (err) {
@@ -1678,7 +1984,7 @@ export default function App() {
     dragRef.current = null;
     if (!d || d.moved || modeRef.current !== "play") return;
     const { lx, ly } = canvasPoint(e);
-    commandAt(lx, ly);
+    commandAt(lx, ly, e.shiftKey);
   };
 
   const onDoubleClick = () => {
@@ -1713,7 +2019,7 @@ export default function App() {
   };
 
   const commandAt = useCallback(
-    (lx, ly) => {
+    (lx, ly, shift) => {
       const g = gameRef.current;
       if (g.status !== "playing") return;
       const cam = camRef.current;
@@ -1735,12 +2041,24 @@ export default function App() {
       if (clickedGuard) {
         const guard = clickedGuard;
         if (guard.state === "knocked") return;
+        // Angriffsbefehl: Shift+Klick oder Klick auf alarmierte Wache
+        if (shift || guard.state === "alert") {
+          if (guard.engagedChars.includes(g.selected)) return;
+          c.koTarget = null;
+          c.attackTarget = guard.id;
+          c.path = findPath(g.map, g.charNavs[c.id], c, { x: guard.x, y: guard.y }, c);
+          const m = matchupMod(c.weapon.cat, guard.weapon.cat);
+          pushMessage(
+            m.dmg > 1
+              ? `${c.name} greift an – Waffenvorteil!`
+              : m.dmg < 1
+                ? `${c.name} greift an – Waffennachteil!`
+                : `${c.name} greift an.`,
+          );
+          return;
+        }
         const dist = Math.hypot(guard.x - c.x, guard.y - c.y);
-        if (dist <= c.koRange) {
-          if (guard.state === "alert") {
-            pushMessage("Wache ist alarmiert – K.o. nicht möglich!");
-            return;
-          }
+        if (dist <= c.koRange * WEAPON_TIERS[c.weapon.tier].ko) {
           guard.state = "knocked";
           guard.path = [];
           g.knocked++;
@@ -1760,6 +2078,25 @@ export default function App() {
           g.selected = i;
           return;
         }
+      }
+
+      // Rückzug aus dem Kampf (Klick auf freie Fläche)
+      if (c.engaged.length > 0) {
+        const flags = polyFlagsAt(g.map, c);
+        const free = c.canAcro && flags && flags.includes("acro");
+        if (!free && c.stamina < COMBAT.disengageCost) {
+          pushMessage(`${c.name} ist zu erschöpft für den Rückzug!`);
+          return;
+        }
+        if (!free) c.stamina -= COMBAT.disengageCost;
+        for (const gid of c.engaged) {
+          const gu = g.guards[gid];
+          if (gu) gu.engagedChars = gu.engagedChars.filter((x) => x !== g.selected);
+        }
+        c.engaged = [];
+        c.attackTarget = null;
+        c.disengageUntil = g.time + 2.5;
+        pushMessage(free ? `${c.name} entkommt mit einem Sprung!` : `${c.name} löst sich aus dem Kampf.`);
       }
 
       c.koTarget = null;
@@ -1798,6 +2135,8 @@ export default function App() {
         g.whistleFx.t += dt;
         if (g.whistleFx.t > 1.2) g.whistleFx = null;
       }
+      for (const fx of g.combatFx ?? []) fx.t += dt;
+      if (g.combatFx) g.combatFx = g.combatFx.filter((fx) => fx.t <= 1.2);
 
       // Kamera
       const panSpeed = 430 * dt / cam.z;
@@ -1852,6 +2191,8 @@ export default function App() {
           hidden,
           follow: !!cam.follow,
           showWalk: g.showWalk !== false,
+          stams: g.chars.map((c) => Math.round(c.stamina)).join(","),
+          fights: g.guards.reduce((m, gu) => m + (gu.engagedChars.length > 0 ? 1 : 0), 0),
         };
         const same =
           prev.selected === next.selected &&
@@ -1863,7 +2204,9 @@ export default function App() {
           prev.whistleReady === next.whistleReady &&
           prev.hidden === next.hidden &&
           prev.follow === next.follow &&
-          prev.showWalk === next.showWalk;
+          prev.showWalk === next.showWalk &&
+          prev.stams === next.stams &&
+          prev.fights === next.fights;
         return same ? prev : next;
       });
 
@@ -1985,6 +2328,20 @@ export default function App() {
                       <span>
                         <span className="block text-sm font-semibold">{c.name}</span>
                         <span className="block text-[10px] leading-tight text-stone-400">{c.role}</span>
+                        <span className="mt-1 block h-1.5 w-full overflow-hidden rounded bg-stone-800">
+                          <span
+                            className="block h-full"
+                            style={{
+                              width: `${Math.max(0, (c.stamina / c.maxStamina) * 100)}%`,
+                              backgroundColor:
+                                c.stamina > c.maxStamina * 0.5
+                                  ? "#34d399"
+                                  : c.stamina > c.maxStamina * 0.25
+                                    ? "#fbbf24"
+                                    : "#ef4444",
+                            }}
+                          />
+                        </span>
                       </span>
                     </button>
                   ))}
@@ -2037,9 +2394,15 @@ export default function App() {
                 <div className="rounded-lg border border-stone-700/60 bg-stone-900/40 p-3 text-[11px] leading-relaxed text-stone-300">
                   <p className="mb-1 font-semibold text-stone-100">Steuerung</p>
                   <p>Klick: Figur bewegen / Wache ausschalten</p>
+                  <p>Shift+Klick auf Wache: Kampf aufnehmen</p>
+                  <p>Klick daneben im Kampf: Rückzug (25 Ausdauer)</p>
                   <p>Ziehen, Pfeiltasten, Mausrad: Kamera</p>
                   <p>1–3: Figur · F: folgen · V: Laufflächen</p>
                   <p>S: Schleichen · Q: Pfeifen · R: Neustart</p>
+                  <p className="mt-1 text-stone-400">
+                    Waffen-Dreieck: Schwert schlägt Schwer, Schwer schlägt Speer, Speer schlägt Schwert (Ringfarbe).
+                    Ringstärke = Stufe. 3 Gegner sind knapp machbar, 4 nicht – Kampf erzeugt Lärm (rote Ringe).
+                  </p>
                 </div>
               </>
             ) : (
@@ -2159,6 +2522,38 @@ export default function App() {
                     Patrouille: zwei Endpunkte (A↔B). Posten: Standpunkt + Blickpunkt. GOLD und FLUCHT verschiebbar.
                     Wachen-Punkte auf Laufflächen legen, sonst laufen sie nicht.
                   </p>
+                  {editInfo.selectedGuard !== null && (
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      <label className="flex flex-col gap-1 text-[10px] text-stone-400">
+                        Waffen-Kategorie
+                        <select
+                          value={editInfo.guardWeapon?.cat ?? "sword"}
+                          onChange={(e) => setGuardWeapon("cat", e.target.value)}
+                          className="rounded border border-stone-700 bg-stone-950 px-1.5 py-1 text-xs text-stone-200"
+                        >
+                          <option value="sword">Schwert</option>
+                          <option value="spear">Speer</option>
+                          <option value="heavy">Schwer (Axt &amp; Co.)</option>
+                        </select>
+                      </label>
+                      <label className="flex flex-col gap-1 text-[10px] text-stone-400">
+                        Stufe
+                        <select
+                          value={editInfo.guardWeapon?.tier ?? "std"}
+                          onChange={(e) => setGuardWeapon("tier", e.target.value)}
+                          className="rounded border border-stone-700 bg-stone-950 px-1.5 py-1 text-xs text-stone-200"
+                        >
+                          <option value="light">Leicht</option>
+                          <option value="std">Standard</option>
+                          <option value="heavy">Schwer</option>
+                        </select>
+                      </label>
+                      <p className="w-full text-[10px] text-stone-500">
+                        Auswahl: {editInfo.guardWeapon ? weaponName(editInfo.guardWeapon) : "—"} · Dreieck: Schwert
+                        &gt; Schwer &gt; Speer &gt; Schwert
+                      </p>
+                    </div>
+                  )}
                 </div>
 
                 <div className="rounded-lg border border-stone-700/60 bg-stone-900/40 p-3">

@@ -1,112 +1,116 @@
-# Stealth-Engine
+# Sherwood – Polygon-Map-Editor & Stealth-Taktik
 
-Stealth-Taktik-Prototyp im Stil von "Robin Hood: The Legend of Sherwood".
+Stealth-Taktik im Stil von „Robin Hood: The Legend of Sherwood", gebaut als React-Canvas (Vite). Die Karte besteht aus Polygonen: Laufflächen, Verstecke, Sichtblocker, Übergänge (Sprünge, Türen) und Wachen-Marker. Ein eingebauter Editor erlaubt das Anlegen eigener Karten, den Export als JSON und die Generierung eines passenden Kartenbildes.
 
 ## Features
 
-- **Polygon-Karte**: Ebenen `walk` (begehbar), `hide` (Versteck), `block` (Hindernis) — keine Tiles. Polygone sind benennbar und haben optionale Flags.
-- **Polygon-Flags**: `climb` (Kletterwand — nur Figuren mit Kletter-Fähigkeit, Bewegung 0,55×), `acro` (Akrobatik-Fläche — nur Akrobaten, Bewegung 1,6×).
-- **Übergänge**: `jump` (Akrobatik-Sprung im Bogen von Fläche A nach B, nur Akrobaten) und `door` (Tür/Geheimgang, teleportiert alle Figuren). Beide sind normale Kanten im Navigationsgraph.
-- **Navigation**: Sichtbarkeitsgraph (Polygon-Ecken + Übergangsknoten), Dijkstra-Pfadsuche, String-Pulling; pro Figur ein eigener Graph abhängig von ihren Fähigkeiten.
-- **Map-Editor**: Polygone zeichnen, benennen, Flags setzen, verschieben, Ecken editieren (Doppelklick auf Kante fügt Punkt ein), Wachen/Marker/Übergänge ziehen, JSON-Export/-Import, Hintergrundbild laden.
-- **Stealth-Mechanik**: Sichtkegel der Wachen, Versteck-Mechanik, Pfeifen, Schleichen, K.o. von hinten, Alarmausbreitung. Wachen benutzen keine Übergänge und keine Flag-Flächen.
-- **Kamera**: Zoom (Mausrad, 0,3–1,6×), Follow-Modus, freies Scrollen.
+- **Polygon-Karte**: Laufflächen (`walk`), Verstecke (`hide`), Sichtblocker (`block`) mit Sichtkegel-Berechnung
+- **Polygon-Flags**: `climb` (kletterbar, nur Robin, 0,55× Tempo) und `acro` (Akrobatik, nur Marian, 1,6× Tempo)
+- **Übergänge**: Sprünge (nur Akrobaten, Bogen-Animation) und Türen/Geheimgänge (Teleport, alle Figuren)
+- **Figuren mit Fähigkeiten**: Robin (klettert), Marian (Akrobatin, Sprung-Rückzug aus dem Kampf), Little John (K.o. aus der Distanz)
+- **Kampfsystem**: Ausdauer-basiert, Waffen-Dreieck mit Stufen, Gruppenkampf, Kampflärm
+- **Wachen-KI**: Patrouillen, Posten mit Ablenkung, Misstrauen, Alarm, Fund bewusstloser Kollegen
+- **Editor**: Polygone zeichnen/verschieben, Wachen platzieren, Waffen zuweisen, Übergänge setzen, JSON Import/Export, Hintergrundbild
 
-## Figuren und Fähigkeiten
+## Kampfsystem
 
-| Figur | Fähigkeit | Besonderheit |
+### Ausdauer statt zweiter HP-Leiste
+
+Jede Figur hat Ausdauer (Robin 100, John 120, Marian 80). Pro Kampfrunde (1,5 s) kostet der Kampf Ausdauer, überlinear mit der Zahl gebundener Gegner:
+
+```
+drain = 5 · (n · 0,85)^1,5 · matchupDrain · tierDrain / allies^0,8
+```
+
+- **1 Figur gegen 3 Gegner**: knapp gewinnbar
+- **1 Figur gegen 4 Gegner**: nicht gewinnbar – Überzahl bleibt Überzahl
+- **Gruppenkampf**: jeder weitere eigene Charakter im Kampf bringt nur ~60 % (sublineare Skalierung); Schadensbonus `1 + 0,5·(k−1)^0,7`
+- **Rücken an Rücken**: eigene Figuren in Kampfnähe (< 40 px) dämpfen den Ausdauerverbrauch (`/allies^0,8`)
+- Ausdauer = 0: Figur ist überwältigt, Mission verloren
+
+### Waffen-Dreieck (Schere-Stein-Papier)
+
+| Kategorie | schlägt | verliert gegen |
 |---|---|---|
-| Robin | Klettern | betritt `climb`-Flächen (langsam) |
-| Little John | — | K.o. aus der Distanz, aber keine Flag-Flächen |
-| Marian | Akrobatik | betritt `acro`-Flächen (schnell), nutzt Sprung-Übergänge |
+| Schwert | Schwer | Speer |
+| Schwer | Speer | Schwert |
+| Speer | Schwert | Schwert |
 
-## Workflow: KI-generierte Karte
+Modifikatoren pro Bindungspaar: Vorteil ×1,5 Schaden / ×0,85 Ausdauer, Nachteil ×0,6 / ×1,15, neutral ×1.
 
-1. Im Editor Polygone zeichnen/anordnen und benennen (Eingabefeld unter „Polygone").
-2. „JSON exportieren" und das JSON an den Assistenten übergeben → erzeugt daraus ein gemaltes Kartenbild, das sich ungefähr an das Layout und die Namen hält.
-3. Bild entweder lokal als `public/map.jpg` speichern (wird beim Start automatisch geladen) oder im Editor über „Hintergrund laden" einlegen.
-4. Polygone über das Bild ziehen, bis alles passt; „JSON exportieren" sichert das Ergebnis.
+### Waffenstufen
 
-## Entwicklung
+| Kategorie | Leicht | Standard | Schwer |
+|---|---|---|---|
+| Schwert | Dolch | Einhänder | Zweihänder |
+| Speer | Mistgabel | Speer | Hellebarde |
+| Schwer | Knüppel | Axt | Morgenstern |
 
-### Mit Nix (empfohlen)
+Stufen-Multiplikatoren: Schaden ×0,7/×1,0/×1,35, Ausdauerkosten ×0,75/×1,0/×1,3, Kampf-Tempo ×1,1/×1,0/×0,85, K.o.-Reichweite ×0,8/×1,0/×0,7.
 
-```sh
-nix develop       # Dev-Shell mit Node.js 22
-npm install       # einmalig
-npm run dev       # Dev-Server: http://localhost:5173
-```
+### Figuren
 
-Produktions-Build:
+| Figur | Rolle | Waffe | Ausdauer | Fähigkeit |
+|---|---|---|---|---|
+| Robin | Ausgewogen | Einhänder | 100 | klettert |
+| Little John | Bruiser | Morgenstern | 120 | K.o. aus der Distanz |
+| Marian | schnell | Dolch | 80 | Akrobatin, Sprünge, kostenloser Sprung-Rückzug auf Akro-Flächen |
 
-```sh
-npm run build     # -> dist/
-npm run preview
-```
+### Kampf-Befehle
 
-### Ohne Nix
+- **Shift+Klick auf Wache** (oder Klick auf alarmierte Wache): Kampf aufnehmen
+- **Klick auf freie Fläche im Kampf**: Rückzug (25 Ausdauer, 2,5 s verlangsamt); Marian auf Akro-Fläche: gratis Sprung
+- **Kampflärm**: jede Kampfrunde erzeugt ein Lärmereignis (Radius 300, rote Ringe); Wachen im Radius alarmieren und laufen heran – ankommende Wachen treten in den Kampf ein
 
-Node.js >= 20 genügt: `npm install && npm run dev`.
+### Tuning-Knöpfe
 
-## Projektstruktur
+Alle Werte liegen in der `COMBAT`-Konstante (`tick`, `drainBase`, `drainExp`, `counterFactor`, `comboExp`, `allyDiv`, `drainMinExp`, `enemyCap`).
 
-```
-flake.nix                 # Nix-Dev-Shell (nix develop)
-package.json              # Vite + React + Tailwind v4
-vite.config.js            # Alias "@" -> src/
-public/map.jpg            # optionales eigenes Hintergrundbild
-index.html
-src/App.jsx               # komplettes Spiel
-src/main.jsx              # Einstiegspunkt
-src/index.css             # Tailwind-Import
-src/components/ui/        # Badge/Button als leichte Shims
-```
+## Wachen-Waffen im Editor
 
-## Steuerung
+Ausgewählte Wache: zwei Dropdowns (Kategorie: Schwert/Speer/Schwer, Stufe: Leicht/Standard/Schwer). Im Spiel zeigt der Ring um die Wache die Kategorie (Farbe) und die Stufe (Ringstärke; schwere Stufe zusätzlich gestrichelter Außenring). HP-Balken erscheint bei Beschädigung.
 
-| Taste | Aktion |
-|---|---|
-| Klick | Figur zum Ziel bewegen |
-| 1–3 | Figur auswählen |
-| S | Schleichen an/aus |
-| Q | Pfeifen (Wachen ablenken) |
-| F | Follow-Modus an/aus |
-| V | Laufflächen ein-/ausblenden |
-| Pfeiltasten | Kamera bewegen |
-| Mausrad | Zoomen |
-| R | Neustart |
-
-Editor: Klick = Punkt, Doppelklick = Polygon schließen / Punkt auf Kante einfügen, Ziehen = verschieben, Entf = löschen.
-
-## Kartenformat (JSON)
+## JSON-Format
 
 ```json
 {
-  "world": { "w": 1536, "h": 864 },
+  "world": { "w": 1600, "h": 1000 },
   "layers": {
-    "walk": [{ "name": "Marktdach", "pts": [{ "x": 100, "y": 200 }], "flags": ["acro"] }],
-    "hide": [],
-    "block": []
+    "walk":  [{ "name": "Dorf", "pts": [{ "x": 0, "y": 0 }], "flags": ["climb"] }],
+    "hide":  [{ "name": "Hecke", "pts": [] }],
+    "block": [{ "name": "Burg", "pts": [] }]
   },
   "markers": {
-    "escape": { "x": 0, "y": 0, "r": 50 },
-    "gold": { "x": 0, "y": 0 },
-    "guards": [{ "type": "pacer", "a": { "x": 0, "y": 0 }, "b": { "x": 0, "y": 0 } }],
+    "escape": { "x": 100, "y": 800, "r": 120 },
+    "gold":   { "x": 1400, "y": 150 },
+    "guards": [
+      { "type": "pacer", "a": {}, "b": {}, "weapon": { "cat": "sword", "tier": "std" } },
+      { "type": "sentry", "post": {}, "look": {}, "weapon": { "cat": "heavy", "tier": "heavy" } }
+    ],
     "transitions": [
-      { "type": "jump", "name": "Dachsprung", "from": { "x": 0, "y": 0 }, "to": { "x": 0, "y": 0 } },
-      { "type": "door", "name": "Geheimgang", "from": { "x": 0, "y": 0 }, "to": { "x": 0, "y": 0 } }
+      { "type": "jump", "name": "Dachsprung", "from": {}, "to": {} },
+      { "type": "door", "name": "Geheimgang", "from": {}, "to": {} }
     ]
   }
 }
 ```
 
-Gültige Flags: `climb` (Kletterwand), `acro` (Akrobatik). Übergänge: `jump` nur für Akrobaten, `door` für alle. Ältere Karten ohne `name`/`pts`/`flags` werden beim Import automatisch konvertiert.
+- `flags` ist optional (`climb`, `acro`); `transitions` ist optional
+- `weapon` ist optional; fehlende Wachen bekommen eine zufällige Waffe (60 % Standard, 25 % Leicht, 15 % Schwer)
+- Altes String-Format (`"weapon": "axe"`) wird normalisiert (`axe` → Schwer/Standard)
 
-## Hinweise
+## Entwicklung
 
-- Die Original-Hintergrundbild-URLs sind nicht öffentlich erreichbar; das Spiel fällt automatisch auf die gemalte Ersatzkarte zurück. `public/map.jpg` hat Vorrang, wenn vorhanden.
-- `src/components/ui/` enthält minimale Shims für Badge/Button. Beim Wechsel auf shadcn/ui die beiden Dateien durch die echten Komponenten ersetzen.
+```bash
+npm install
+npm run dev
+```
 
-## Status
+Kartenbild als `public/map.jpg` ablegen – es wird automatisch als Hintergrund geladen (Cascade über `IMG_SOURCES`).
 
-Lauffähiger Prototyp. Ausbauschritte: Gegner-KI-Verbände, Rettungsszenarien, Sound, Tragen von K.o.-Gegnern.
+## Steuerung
+
+- Klick: Figur bewegen / Wache ausschalten (stille Wachen in K.o.-Reichweite)
+- Shift+Klick auf Wache: Kampf aufnehmen
+- 1–3: Figur wählen · S: Schleichen · Q: Pfeifen · F: Kamera folgen · V: Laufflächen · R: Neustart
+- Ziehen, Pfeiltasten, Mausrad: Kamera
