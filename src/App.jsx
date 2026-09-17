@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 // ============================================================
 
 const IMG_SOURCES = [
+  "/map.jpg",
   "gen-image://57c5ccbf",
   "https://mistralaichatupprodswe.blob.core.windows.net/chat-images/assistant/94/3c/cb/943ccbec-dc09-4583-a291-f15b67076a22/3d534e61-0f11-440c-8b07-9badacfb0251/6557861b-ad9c-4540-9518-845d60a3f64f/a85e0a21-c88a-4a31-b99c-e60fd3022429.jpg",
 ];
@@ -63,18 +64,18 @@ function pointWalkable(map, p) {
   if (!p) return false;
   for (const poly of map.layers.walk) {
     if (!poly) continue;
-    if (pointInPoly(p.x, p.y, poly)) return true;
+    if (pointInPoly(p.x, p.y, poly.pts)) return true;
   }
   return false;
 }
 
 function pointHidden(map, p) {
-  for (const poly of map.layers.hide) if (pointInPoly(p.x, p.y, poly)) return true;
+  for (const poly of map.layers.hide) if (pointInPoly(p.x, p.y, poly.pts)) return true;
   return false;
 }
 
 function pointBlocksSight(map, p) {
-  for (const poly of map.layers.block) if (pointInPoly(p.x, p.y, poly)) return true;
+  for (const poly of map.layers.block) if (pointInPoly(p.x, p.y, poly.pts)) return true;
   return false;
 }
 
@@ -119,9 +120,10 @@ function nearestWalkable(map, p) {
 function buildNav(map) {
   const nodes = [];
   for (const poly of map.layers.walk) {
-    if (poly.length < 3) continue;
-    nodes.push(centroid(poly));
-    for (const p of poly) nodes.push({ x: p.x, y: p.y });
+    const pts = poly.pts;
+    if (pts.length < 3) continue;
+    nodes.push(centroid(pts));
+    for (const p of pts) nodes.push({ x: p.x, y: p.y });
   }
   const adj = nodes.map(() => []);
   for (let i = 0; i < nodes.length; i++)
@@ -223,32 +225,38 @@ function defaultMap(w, h) {
   const roadAt = (t) => ({ x: roadA.x + dx * t, y: roadA.y + dy * t });
   const off = (p, s, d) => ({ x: p.x + nx * s * d, y: p.y + ny * s * d });
 
-  const road = [
-    off(roadA, 1, roadHalf),
-    off(roadB, 1, roadHalf),
-    off(roadB, -1, roadHalf),
-    off(roadA, -1, roadHalf),
-  ];
+  const road = {
+    name: "Landstraße",
+    pts: [
+      off(roadA, 1, roadHalf),
+      off(roadB, 1, roadHalf),
+      off(roadB, -1, roadHalf),
+      off(roadA, -1, roadHalf),
+    ],
+  };
   const plazaC = { x: 0.865 * w, y: 0.185 * h };
-  const plaza = octagon(plazaC.x, plazaC.y, 0.14 * h);
+  const plaza = { name: "Burghof", pts: octagon(plazaC.x, plazaC.y, 0.14 * h) };
   const villageC = { x: 0.115 * w, y: 0.845 * h };
-  const village = octagon(villageC.x, villageC.y, 0.16 * h);
+  const village = { name: "Dorf", pts: octagon(villageC.x, villageC.y, 0.16 * h) };
 
   const hedges = [0.2, 0.31, 0.46, 0.63, 0.74].map((t, i) => {
     const c = off(roadAt(t), i % 2 === 0 ? 1 : -1, roadHalf + 0.05 * h);
-    return octagon(c.x, c.y, 0.065 * h);
+    return { name: "Hecke", pts: octagon(c.x, c.y, 0.065 * h) };
   });
 
-  const castle = [
-    { x: 0.66 * w, y: 0 },
-    { x: w, y: 0 },
-    { x: w, y: 0.13 * h },
-    { x: 0.66 * w, y: 0.13 * h },
-  ];
+  const castle = {
+    name: "Burg",
+    pts: [
+      { x: 0.66 * w, y: 0 },
+      { x: w, y: 0 },
+      { x: w, y: 0.13 * h },
+      { x: 0.66 * w, y: 0.13 * h },
+    ],
+  };
   const trees = [
-    octagon(0.36 * w, 0.3 * h, 0.045 * w),
-    octagon(0.56 * w, 0.66 * h, 0.045 * w),
-    octagon(0.24 * w, 0.52 * h, 0.04 * w),
+    { name: "Waldstück", pts: octagon(0.36 * w, 0.3 * h, 0.045 * w) },
+    { name: "Waldstück", pts: octagon(0.56 * w, 0.66 * h, 0.045 * w) },
+    { name: "Waldstück", pts: octagon(0.24 * w, 0.52 * h, 0.04 * w) },
   ];
 
   const sentryPost = { x: plazaC.x, y: plazaC.y + 0.14 * h * 0.45 };
@@ -279,9 +287,9 @@ function scaleMap(map, nw, nh) {
   const out = {
     world: { w: nw, h: nh },
     layers: {
-      walk: map.layers.walk.map((poly) => poly.map(sp)),
-      hide: map.layers.hide.map((poly) => poly.map(sp)),
-      block: map.layers.block.map((poly) => poly.map(sp)),
+      walk: map.layers.walk.map((poly) => ({ name: poly.name, pts: poly.pts.map(sp) })),
+      hide: map.layers.hide.map((poly) => ({ name: poly.name, pts: poly.pts.map(sp) })),
+      block: map.layers.block.map((poly) => ({ name: poly.name, pts: poly.pts.map(sp) })),
     },
     markers: {
       escape: {
@@ -610,9 +618,10 @@ function drawBackground(ctx, map, img) {
   ctx.fillStyle = "#4a7c3a";
   ctx.fillRect(0, 0, map.world.w, map.world.h);
   for (const poly of map.layers.walk) {
+    const pts = poly.pts;
     ctx.beginPath();
-    ctx.moveTo(poly[0].x, poly[0].y);
-    for (let i = 1; i < poly.length; i++) ctx.lineTo(poly[i].x, poly[i].y);
+    ctx.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
     ctx.closePath();
     ctx.fillStyle = "#b59a6b";
     ctx.fill();
@@ -756,7 +765,7 @@ function drawPlay(ctx, g, t, showWalk) {
   if (showWalk) {
     ctx.fillStyle = "rgba(134,239,172,0.14)";
     for (const poly of map.layers.walk) {
-      fillPolyPath(ctx, poly);
+      fillPolyPath(ctx, poly.pts);
       ctx.fill();
     }
   }
@@ -775,12 +784,12 @@ function drawPlay(ctx, g, t, showWalk) {
 
   // Verstecke als Hecken andeuten
   for (const poly of map.layers.hide) {
-    const c = centroid(poly);
-    const r = Math.sqrt(polyArea(poly) / Math.PI);
+    const c = centroid(poly.pts);
+    const r = Math.sqrt(polyArea(poly.pts) / Math.PI);
     ctx.strokeStyle = "rgba(52,211,153,0.35)";
     ctx.setLineDash([8, 8]);
     ctx.lineWidth = 2;
-    fillPolyPath(ctx, poly);
+    fillPolyPath(ctx, poly.pts);
     ctx.stroke();
     ctx.setLineDash([]);
     if (r > 18) drawBush(ctx, c.x, c.y, Math.min(r, 42));
@@ -842,17 +851,28 @@ function drawEdit(ctx, map, edit, hover) {
     const polys = map.layers[layerName];
     for (let pi = 0; pi < polys.length; pi++) {
       const poly = polys[pi];
-      if (poly.length < 2) continue;
+      const pts = poly.pts;
+      if (pts.length < 2) continue;
       const sel = edit.selected && edit.selected.layer === layerName && edit.selected.index === pi;
-      fillPolyPath(ctx, poly);
+      fillPolyPath(ctx, pts);
       ctx.fillStyle = style.fill;
       ctx.fill();
       ctx.strokeStyle = sel ? "#fbbf24" : style.stroke;
       ctx.lineWidth = sel ? 3 : 1.5;
       ctx.stroke();
+      if (poly.name) {
+        const c = centroid(pts);
+        ctx.font = "bold 14px Georgia, serif";
+        ctx.textAlign = "center";
+        ctx.lineWidth = 4;
+        ctx.strokeStyle = "rgba(0,0,0,0.75)";
+        ctx.strokeText(poly.name, c.x, c.y);
+        ctx.fillStyle = "#fde68a";
+        ctx.fillText(poly.name, c.x, c.y);
+      }
       if (sel) {
         ctx.fillStyle = "#fbbf24";
-        for (const p of poly) {
+        for (const p of pts) {
           ctx.beginPath();
           ctx.arc(p.x, p.y, 6, 0, Math.PI * 2);
           ctx.fill();
@@ -955,13 +975,14 @@ export default function App() {
   const modeRef = useRef("play");
   const mapRef = useRef(null);
   const editRef = useRef({ drawing: null, selected: null, selectedGuard: null });
+  const bgFileRef = useRef(null);
   if (!mapRef.current) mapRef.current = defaultMap(worldDims.current.w, worldDims.current.h);
   if (!gameRef.current) gameRef.current = newGame(mapRef.current);
 
   const [mode, setMode] = useState("play");
   const [layer, setLayer] = useState("walk");
   const [imgOk, setImgOk] = useState(false);
-  const [editInfo, setEditInfo] = useState({ drawing: 0, selected: false, selectedGuard: null });
+  const [editInfo, setEditInfo] = useState({ drawing: 0, selected: false, selectedGuard: null, name: "" });
   const [jsonText, setJsonText] = useState("");
   const [ui, setUi] = useState({
     selected: 0,
@@ -988,6 +1009,10 @@ export default function App() {
       drawing: e.drawing ? e.drawing.length : 0,
       selected: !!e.selected,
       selectedGuard: e.selectedGuard,
+      name:
+        e.selected && mapRef.current.layers[e.selected.layer][e.selected.index]
+          ? mapRef.current.layers[e.selected.layer][e.selected.index].name ?? ""
+          : "",
     });
   }, []);
 
@@ -1086,7 +1111,7 @@ export default function App() {
   const finishPolygon = useCallback(() => {
     const e = editRef.current;
     if (e.drawing && e.drawing.length >= 3) {
-      mapRef.current.layers[layer].push(e.drawing);
+      mapRef.current.layers[layer].push({ name: "", pts: e.drawing });
     }
     e.drawing = null;
     syncEditInfo();
@@ -1130,6 +1155,24 @@ export default function App() {
     syncEditInfo();
   }, [syncEditInfo]);
 
+  const onBgFile = useCallback((e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      imgRef.current = img;
+      setImgOk(true);
+    };
+    img.src = url;
+    e.target.value = "";
+  }, []);
+
+  const clearBg = useCallback(() => {
+    imgRef.current = null;
+    setImgOk(false);
+  }, []);
+
   const exportJson = useCallback(() => {
     setJsonText(JSON.stringify(mapRef.current));
   }, []);
@@ -1138,7 +1181,16 @@ export default function App() {
     try {
       const parsed = JSON.parse(jsonText);
       if (!parsed.layers || !parsed.layers.walk || !parsed.markers) throw new Error("Struktur unvollständig");
-      mapRef.current = parsed;
+      const normPoly = (p) =>
+        Array.isArray(p) ? { name: "", pts: p } : { name: p.name ?? "", pts: p.pts ?? p.points ?? [] };
+      mapRef.current = {
+        ...parsed,
+        layers: {
+          walk: parsed.layers.walk.map(normPoly),
+          hide: (parsed.layers.hide ?? []).map(normPoly),
+          block: (parsed.layers.block ?? []).map(normPoly),
+        },
+      };
       worldDims.current = parsed.world ?? worldDims.current;
       pushMessage("Karte importiert.");
     } catch (err) {
@@ -1254,9 +1306,9 @@ export default function App() {
     // Punkte der ausgewählten Ebene zuerst
     const polys = map.layers[layer];
     for (let pi = polys.length - 1; pi >= 0; pi--) {
-      const poly = polys[pi];
-      for (let vi = poly.length - 1; vi >= 0; vi--) {
-        if (Math.hypot(poly[vi].x - w.x, poly[vi].y - w.y) < th)
+      const pts = polys[pi].pts;
+      for (let vi = pts.length - 1; vi >= 0; vi--) {
+        if (Math.hypot(pts[vi].x - w.x, pts[vi].y - w.y) < th)
           return { kind: "vertex", layer, index: pi, vi };
       }
     }
@@ -1264,7 +1316,7 @@ export default function App() {
     for (const ln of ["hide", "block", "walk"]) {
       const ps = map.layers[ln];
       for (let pi = ps.length - 1; pi >= 0; pi--) {
-        if (pointInPoly(w.x, w.y, ps[pi])) return { kind: "poly", layer: ln, index: pi };
+        if (pointInPoly(w.x, w.y, ps[pi].pts)) return { kind: "poly", layer: ln, index: pi };
       }
     }
     return null;
@@ -1333,10 +1385,11 @@ export default function App() {
       }
     } else if (d.kind === "vertex") {
       const poly = mapRef.current.layers[d.layer][d.index];
-      poly[d.vi] = { x: poly[d.vi].x + dx, y: poly[d.vi].y + dy };
+      poly.pts[d.vi] = { x: poly.pts[d.vi].x + dx, y: poly.pts[d.vi].y + dy };
     } else if (d.kind === "poly") {
       const poly = mapRef.current.layers[d.layer][d.index];
-      for (let i = 0; i < poly.length; i++) poly[i] = { x: poly[i].x + dx, y: poly[i].y + dy };
+      for (let i = 0; i < poly.pts.length; i++)
+        poly.pts[i] = { x: poly.pts[i].x + dx, y: poly.pts[i].y + dy };
     } else if (d.kind === "guard") {
       const gd = mapRef.current.markers.guards[d.gi];
       gd[d.key] = { x: gd[d.key].x + dx, y: gd[d.key].y + dy };
@@ -1371,11 +1424,12 @@ export default function App() {
     const h = hoverRef.current;
     if (!h) return;
     const poly = mapRef.current.layers[ed.selected.layer][ed.selected.index];
+    const pts = poly.pts;
     // nächsten Randpunkt suchen und Eckpunkt einfügen
     let best = null;
-    for (let i = 0; i < poly.length; i++) {
-      const a = poly[i];
-      const b = poly[(i + 1) % poly.length];
+    for (let i = 0; i < pts.length; i++) {
+      const a = pts[i];
+      const b = pts[(i + 1) % pts.length];
       const abx = b.x - a.x;
       const aby = b.y - a.y;
       const l2 = abx * abx + aby * aby;
@@ -1387,7 +1441,7 @@ export default function App() {
       const dd = Math.hypot(h.x - px, h.y - py);
       if (dd < 16 / camRef.current.z && (!best || dd < best.dd)) best = { dd, i, p: { x: px, y: py } };
     }
-    if (best) poly.splice(best.i + 1, 0, best.p);
+    if (best) pts.splice(best.i + 1, 0, best.p);
   };
 
   const commandAt = useCallback(
@@ -1767,6 +1821,19 @@ export default function App() {
                       Löschen (Entf)
                     </Button>
                   </div>
+                  <input
+                    value={editInfo.name}
+                    disabled={!editInfo.selected}
+                    onChange={(e) => {
+                      const ed = editRef.current;
+                      if (ed.selected) {
+                        mapRef.current.layers[ed.selected.layer][ed.selected.index].name = e.target.value;
+                        setEditInfo((p) => ({ ...p, name: e.target.value }));
+                      }
+                    }}
+                    placeholder="Name des ausgewählten Polygons (z. B. Dorf, Burg, Fluss)"
+                    className="mt-2 w-full rounded border border-stone-700 bg-stone-950 px-2 py-1.5 text-xs text-stone-200 placeholder:text-stone-500 disabled:opacity-40"
+                  />
                   <p className="mt-2 text-[10px] leading-snug text-stone-400">
                     Klick setzt Punkte, Klick auf den ersten Punkt oder Doppelklick schließt das Polygon. Punkte und
                     Flächen verschieben; Doppelklick auf eine Kante fügt einen Punkt ein.
@@ -1792,6 +1859,16 @@ export default function App() {
                 <div className="rounded-lg border border-stone-700/60 bg-stone-900/40 p-3">
                   <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-stone-400">Karte</p>
                   <div className="flex flex-wrap gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => bgFileRef.current && bgFileRef.current.click()}
+                    >
+                      Hintergrund laden
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={clearBg}>
+                      Hintergrund weg
+                    </Button>
                     <Button size="sm" variant="outline" onClick={resetMap}>
                       Standardkarte
                     </Button>
@@ -1808,6 +1885,12 @@ export default function App() {
                     placeholder="Export füllt dieses Feld; zum Importieren JSON hier einfügen und 'JSON anwenden' klicken."
                     className="mt-2 h-24 w-full rounded border border-stone-700 bg-stone-950 p-2 font-mono text-[10px] text-stone-300"
                   />
+                  <input ref={bgFileRef} type="file" accept="image/*" onChange={onBgFile} className="hidden" />
+                  <p className="mt-2 text-[10px] leading-snug text-stone-400">
+                    Workflow: Polygone benennen, JSON exportieren, daraus ein Kartenbild generieren lassen, das Bild
+                    über „Hintergrund laden“ einlegen und die Polygone über das Bild ziehen, bis alles passt. Lokal
+                    wird außerdem automatisch public/map.jpg als Hintergrund verwendet.
+                  </p>
                 </div>
               </>
             )}

@@ -4,11 +4,18 @@ Stealth-Taktik-Prototyp im Stil von "Robin Hood: The Legend of Sherwood".
 
 ## Features
 
-- **Polygon-Karte**: Ebenen `walk` (begehbar), `hide` (Versteck), `block` (Hindernis) — keine Tiles.
+- **Polygon-Karte**: Ebenen `walk` (begehbar), `hide` (Versteck), `block` (Hindernis) — keine Tiles. Polygone sind benennbar (z. B. „Dorf“, „Burg“, „Fluss“).
 - **Navigation**: Sichtbarkeitsgraph (Knoten = Polygon-Ecken + Portale zwischen benachbarten Polygonen), Dijkstra-Pfadsuche, String-Pulling zur Glättung.
-- **Map-Editor**: Polygone zeichnen, verschieben, Ecken editieren, Wachen/Marker ziehen, JSON-Export/-Import.
+- **Map-Editor**: Polygone zeichnen, benennen, verschieben, Ecken editieren (Doppelklick auf Kante fügt Punkt ein), Wachen/Marker ziehen, JSON-Export/-Import, Hintergrundbild laden.
 - **Stealth-Mechanik**: Sichtkegel der Wachen, Versteck-Mechanik (eigene Figuren unentdeckbar bis zum ersten Alarm), Pfeifen, Schleichen, K.o. von hinten, Alarmausbreitung.
 - **Kamera**: Zoom (Mausrad, 0,3–1,6×), Follow-Modus, freies Scrollen.
+
+## Workflow: KI-generierte Karte
+
+1. Im Editor Polygone zeichnen/anordnen und benennen (Eingabefeld unter „Polygone“).
+2. „JSON exportieren“ und das JSON an den Assistenten übergeben → erzeugt daraus ein gemaltes Kartenbild, das sich ungefähr an das Layout und die Namen hält.
+3. Bild entweder lokal als `public/map.jpg` speichern (wird beim Start automatisch geladen) oder im Editor über „Hintergrund laden“ einlegen.
+4. Polygone über das Bild ziehen, bis alles passt; „JSON exportieren“ sichert das Ergebnis.
 
 ## Entwicklung
 
@@ -37,6 +44,7 @@ Node.js >= 20 genügt: `npm install && npm run dev`.
 flake.nix                 # Nix-Dev-Shell (nix develop)
 package.json              # Vite + React + Tailwind v4
 vite.config.js            # Alias "@" -> src/
+public/map.jpg            # optionales eigenes Hintergrundbild
 index.html
 src/App.jsx               # komplettes Spiel
 src/main.jsx              # Einstiegspunkt
@@ -58,21 +66,31 @@ src/components/ui/        # Badge/Button als leichte Shims
 | Mausrad | Zoomen |
 | R | Neustart |
 
+Editor: Klick = Punkt, Doppelklick = Polygon schließen / Punkt auf Kante einfügen, Ziehen = verschieben, Entf = löschen.
+
 ## Kartenformat (JSON)
 
 ```json
 {
-  "walk": [[[0,0],[100,0],[100,50],[0,50]]],
-  "hide": [],
-  "block": [],
-  "guards": [{ "path": [[x,y],[x,y]], "speed": 40 }],
-  "posts": [{ "pos": [x,y], "facing": 0 }]
+  "world": { "w": 1536, "h": 864 },
+  "layers": {
+    "walk": [{ "name": "Dorf", "pts": [{ "x": 100, "y": 200 }] }],
+    "hide": [],
+    "block": []
+  },
+  "markers": {
+    "escape": { "x": 0, "y": 0, "r": 50 },
+    "gold": { "x": 0, "y": 0 },
+    "guards": [{ "type": "pacer", "a": { "x": 0, "y": 0 }, "b": { "x": 0, "y": 0 } }]
+  }
 }
 ```
 
+Ältere Karten ohne `name`/`pts` (reine Punktelisten) werden beim Import automatisch konvertiert.
+
 ## Hinweise
 
-- Die Original-Hintergrundbild-URLs sind nicht öffentlich erreichbar; das Spiel fällt automatisch auf die gemalte Ersatzkarte zurück (Polygon-Rendering). Eigene Bilder: `IMG_SOURCES` in `src/App.jsx` anpassen.
+- Die Original-Hintergrundbild-URLs sind nicht öffentlich erreichbar; das Spiel fällt automatisch auf die gemalte Ersatzkarte zurück. `public/map.jpg` hat Vorrang, wenn vorhanden.
 - `src/components/ui/` enthält minimale Shims für Badge/Button. Beim Wechsel auf shadcn/ui die beiden Dateien durch die echten Komponenten ersetzen.
 
 ## Status
