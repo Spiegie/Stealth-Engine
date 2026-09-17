@@ -10,6 +10,40 @@ Stealth-Taktik-Prototyp im Stil von "Robin Hood: The Legend of Sherwood".
 - **Stealth-Mechanik**: Sichtkegel der Wachen, Versteck-Mechanik (eigene Figuren unentdeckbar bis zum ersten Alarm), Pfeifen, Schleichen, K.o. von hinten, Alarmausbreitung.
 - **Kamera**: Zoom (Mausrad, 0,3–1,6×), Follow-Modus, freies Scrollen.
 
+## Entwicklung
+
+### Mit Nix (empfohlen)
+
+```sh
+nix develop       # Dev-Shell mit Node.js 22
+npm install       # einmalig
+npm run dev       # Dev-Server: http://localhost:5173
+```
+
+Produktions-Build:
+
+```sh
+npm run build     # -> dist/
+npm run preview
+```
+
+### Ohne Nix
+
+Node.js >= 20 genügt: `npm install && npm run dev`.
+
+## Projektstruktur
+
+```
+flake.nix                 # Nix-Dev-Shell (nix develop)
+package.json              # Vite + React + Tailwind v4
+vite.config.js            # Alias "@" -> src/
+index.html
+src/App.jsx               # komplettes Spiel
+src/main.jsx              # Einstiegspunkt
+src/index.css             # Tailwind-Import
+src/components/ui/        # Badge/Button als leichte Shims
+```
+
 ## Steuerung
 
 | Taste | Aktion |
@@ -19,10 +53,10 @@ Stealth-Taktik-Prototyp im Stil von "Robin Hood: The Legend of Sherwood".
 | S | Schleichen an/aus |
 | Q | Pfeifen (Wachen ablenken) |
 | F | Follow-Modus an/aus |
-| V | Versteck betreten/verlassen |
+| V | Laufflächen ein-/ausblenden |
 | Pfeiltasten | Kamera bewegen |
 | Mausrad | Zoomen |
-| R | Editor: Standardkarte laden |
+| R | Neustart |
 
 ## Kartenformat (JSON)
 
@@ -36,9 +70,10 @@ Stealth-Taktik-Prototyp im Stil von "Robin Hood: The Legend of Sherwood".
 }
 ```
 
-## Einbindung
+## Hinweise
 
-Nur `react` wird benötigt. `src/App.jsx` exportiert die Komponente als Default.
+- Die Original-Hintergrundbild-URLs sind nicht öffentlich erreichbar; das Spiel fällt automatisch auf die gemalte Ersatzkarte zurück (Polygon-Rendering). Eigene Bilder: `IMG_SOURCES` in `src/App.jsx` anpassen.
+- `src/components/ui/` enthält minimale Shims für Badge/Button. Beim Wechsel auf shadcn/ui die beiden Dateien durch die echten Komponenten ersetzen.
 
 ## Status
 
