@@ -1,0 +1,11 @@
+{
+  "games": [
+    {
+      "id": "beispiel",
+      "name": "Beispiel-Sammlung",
+      "maps": [
+        { "id": "beispielkarte", "name": "Beispielkarte", "json": "beispielkarte.json", "image": "beispielkarte.png" }
+      ]
+    }
+  ]
+}

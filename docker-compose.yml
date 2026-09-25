@@ -1,0 +1,9 @@
+services:
+  sherwood:
+    build: .
+    ports:
+      - "8080:80"
+    volumes:
+      # Lokale Spielsammlungen hier ablegen; live im Spiel-Menue sichtbar
+      - ./games:/usr/share/nginx/html/games
+    restart: unless-stopped

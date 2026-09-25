@@ -3,20 +3,21 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 
 // ============================================================
-// Sherwood â Stealth-Taktik mit Polygon-Karte + Map-Editor
+// Sherwood – Stealth-Taktik mit Polygon-Karte + Map-Editor
 //
 // Karte = Hintergrundbild + Polygone in acht Ebenen:
-//   walk/climb/acro = LaufflÃ¤chen (Navigation per Sichtbarkeitsgraph);
-//     climb = KletterflÃ¤chen (Kletterer + Akrobaten, langsam),
-//     acro  = AkrobatikflÃ¤chen (nur Akrobaten, schnell)
+//   walk/climb/acro = Laufflächen (Navigation per Sichtbarkeitsgraph);
+//     climb = Kletterflächen (Kletterer + Akrobaten, langsam),
+//     acro  = Akrobatikflächen (nur Akrobaten, schnell)
 //   hide     = Verstecke (durchsuchbar: Wache im Versteck sieht alles darin)
-//   block    = Sichtblocker (Burg, BÃ¤ume, HÃ¤user)
+//   block    = Sichtblocker (Burg, Bäume, Häuser)
 //   blocking = Bewegungsblocker (niemand kommt durch)
 //   start/goal = Startregion und Zielregion
-// Dazu Marker: Wachen (Patrouille A<->B, Posten mit Blickrichtung), ÃbergÃ¤nge.
+// Dazu Marker: Wachen (Patrouille A<->B, Posten mit Blickrichtung), Übergänge.
 // ============================================================
 
 const IMG_SOURCES = [
+  "/map.png",
   "/map.jpg",
   "gen-image://57c5ccbf",
   "https://mistralaichatupprodswe.blob.core.windows.net/chat-images/assistant/94/3c/cb/943ccbec-dc09-4583-a291-f15b67076a22/3d534e61-0f11-440c-8b07-9badacfb0251/6557861b-ad9c-4540-9518-845d60a3f64f/a85e0a21-c88a-4a31-b99c-e60fd3022429.jpg",
@@ -43,7 +44,7 @@ function visionParams(guard) {
   if (guard.engagedChars && guard.engagedChars.length > 0) return VISION.tunnel;
   if (guard.state === "alert") return VISION.alert;
   if (guard.state === "suspicious")
-    // KÃ¶der-Wachen starren aufs GerÃ¤usch: Sichtfeld so schlecht wie unaufmerksam
+    // Köder-Wachen starren aufs Geräusch: Sichtfeld so schlecht wie unaufmerksam
     return guard.distractKind === "noise" ? VISION.inattentive : VISION.suspicious;
   return guard.attentive ? VISION.attentive : VISION.inattentive;
 }
@@ -52,7 +53,7 @@ const WHISTLE_RADIUS = 430;
 const ALARM_SPREAD = 300;
 
 // Bogen (nur Robin): Umschalten dauert, im Bogen-Modus langsames Gehen,
-// begrenzte Pfeile im KÃ¶cher, Schuss braucht Sichtlinie + Reichweite.
+// begrenzte Pfeile im Köcher, Schuss braucht Sichtlinie + Reichweite.
 const BOW = {
   range: 430,
   switchTime: 2.2,
@@ -66,15 +67,15 @@ function bowActive(c, g) {
   return !!c.canBow && !!c.bowMode && g.time >= c.bowSwitchAt;
 }
 
-// Schuss abfeuern. target = { x, y, guard? } fÃ¼r eine Wache
-// oder { x, y, poly } fÃ¼r ein beschieÃbares Interaktionsobjekt.
+// Schuss abfeuern. target = { x, y, guard? } für eine Wache
+// oder { x, y, poly } für ein beschießbares Interaktionsobjekt.
 function fireArrow(g, ch, target, notify) {
   if (ch.arrows <= 0) {
-    notify("Robins KÃ¶cher ist leer.");
+    notify("Robins Köcher ist leer.");
     return false;
   }
   if (ch.engaged.length > 0 || ch.bowStowAt != null) {
-    notify("Im Nahkampf kommt Robin nicht zum SchieÃen.");
+    notify("Im Nahkampf kommt Robin nicht zum Schießen.");
     return false;
   }
   if (!hasLineOfSight(g.map, ch, target)) {
@@ -83,7 +84,7 @@ function fireArrow(g, ch, target, notify) {
   }
   const dist = Math.hypot(target.x - ch.x, target.y - ch.y);
   if (dist > BOW.range) {
-    notify("Zu weit fÃ¼r einen Schuss.");
+    notify("Zu weit für einen Schuss.");
     return false;
   }
   ch.arrows--;
@@ -101,8 +102,8 @@ function fireArrow(g, ch, target, notify) {
     tg: target.guard ? target.guard.id : null,
     poly: target.poly ?? null,
   });
-  notify("Robin schieÃt!");
-  // Bogenschuss macht ein leises GerÃ¤usch
+  notify("Robin schießt!");
+  // Bogenschuss macht ein leises Geräusch
   for (const guard of g.guards) {
     if (guard.state === "knocked" || guard.state === "alert") continue;
     if (guard === target.guard) continue;
@@ -126,10 +127,10 @@ const COMBAT = {
   drainBase: 5,
   drainExp: 1.5,
   counterFactor: 0.22, // Gegenschaden der Wache auf die Ausdauer
-  disadvFactor: 2.4, // zusÃ¤tzlicher Gegenschaden bei Waffennachteil
-  disadvDrain: 2, // zusÃ¤tzlicher Ausdauerverbrauch bei Waffennachteil
+  disadvFactor: 2.4, // zusätzlicher Gegenschaden bei Waffennachteil
+  disadvDrain: 2, // zusätzlicher Ausdauerverbrauch bei Waffennachteil
   comboExp: 0.7, // Schadensbonus bei mehreren Angreifern (sublinear)
-  allyDiv: 0.8, // RÃ¼cken-an-RÃ¼cken: Ausdauerkosten / allies^allyDiv
+  allyDiv: 0.8, // Rücken-an-Rücken: Ausdauerkosten / allies^allyDiv
   drainMinExp: 1.1, // Untergrenze des Ausdauerverbrauchs (Masse-Schutz)
   flankRange: 40,
   disengageCost: 25,
@@ -149,9 +150,9 @@ const WEAPON_TIERS = {
   heavy: { label: "Schwer", dmg: 1.35, drain: 1.3, move: 0.85, ko: 0.7 },
 };
 const WEAPON_LISTS = {
-  sword: { light: "Dolch", std: "EinhÃ¤nder", heavy: "ZweihÃ¤nder" },
+  sword: { light: "Dolch", std: "Einhänder", heavy: "Zweihänder" },
   spear: { light: "Mistgabel", std: "Speer", heavy: "Hellebarde" },
-  heavy: { light: "KnÃ¼ppel", std: "Axt", heavy: "Morgenstern" },
+  heavy: { light: "Knüppel", std: "Axt", heavy: "Morgenstern" },
 };
 
 function weaponName(w) {
@@ -202,7 +203,7 @@ function matchupMod(a, b) {
 }
 
 function processCombatTick(g, notify) {
-  // Bindungen aufrÃ¤umen
+  // Bindungen aufräumen
   for (const guard of g.guards) {
     if (guard.engagedChars.length === 0) continue;
     guard.engagedChars = guard.engagedChars.filter((ci) => {
@@ -217,13 +218,13 @@ function processCombatTick(g, notify) {
     let sum = 0;
     for (const ci of guard.engagedChars) {
       const c = g.chars[ci];
-      // Bogen tragende Figuren kÃ¤mpfen nicht â sie verlieren die Initiative
+      // Bogen tragende Figuren kämpfen nicht – sie verlieren die Initiative
       if (c.bowMode) continue;
       sum += COMBAT.baseDmg * matchupMod(c.weapon.cat, guard.weapon.cat).dmg * WEAPON_TIERS[c.weapon.tier].dmg * SKILLS[c.skill].mult;
     }
     const combo = 1 + 0.5 * Math.pow(k - 1, COMBAT.comboExp);
     guard.hp -= (sum / k) * combo;
-    // KampflÃ¤rm alarmiert die Umgebung
+    // Kampflärm alarmiert die Umgebung
     g.combatFx.push({ x: guard.x, y: guard.y, t: 0 });
     for (const other of g.guards) {
       if (other === guard || other.state === "knocked" || other.engagedChars.length > 0) continue;
@@ -233,8 +234,8 @@ function processCombatTick(g, notify) {
         other.lostSightAt = g.time;
       }
     }
-    // Gegenschaden + Ausdauerkosten pro beteiligter Figur â vor dem
-    // Todes-Check, damit die Wache in ihrer letzten Runde noch zuschlÃ¤gt
+    // Gegenschaden + Ausdauerkosten pro beteiligter Figur – vor dem
+    // Todes-Check, damit die Wache in ihrer letzten Runde noch zuschlägt
     const gTier = WEAPON_TIERS[guard.weapon.tier];
     for (const ci of guard.engagedChars) {
       const c = g.chars[ci];
@@ -253,7 +254,7 @@ function processCombatTick(g, notify) {
           (matchupMod(c.weapon.cat, gu.weapon.cat).drain * WEAPON_TIERS[gu.weapon.tier].drain) /
           Math.max(1, c.engaged.length);
       }
-      // Waffennachteil: Die Wache trifft hÃ¤rter und zermÃ¼rbt schneller â
+      // Waffennachteil: Die Wache trifft härter und zermürbt schneller –
       // falsches Matchup darf keine kostenlose Durchlauf-Option sein
       const rawMult = matchupMod(guard.weapon.cat, c.weapon.cat).dmg * gTier.dmg * SKILLS[guard.skill].mult;
       const counterMult = Math.min(2, rawMult);
@@ -274,7 +275,7 @@ function processCombatTick(g, notify) {
         }
         c.engaged = [];
         g.status = "lost";
-        notify(`${c.name} wurde im Kampf Ã¼berwÃ¤ltigt!`);
+        notify(`${c.name} wurde im Kampf überwältigt!`);
       }
     }
     // Todes-Check erst nach dem Gegenschlag der finalen Runde
@@ -324,17 +325,17 @@ function polyArea(poly) {
 }
 
 // Ebenen-Modell:
-//   walk     = normale LaufflÃ¤che (alle)
-//   climb    = KletterflÃ¤che (nur Kletterer/Akrobaten, 0,55Ã Tempo)
-//   acro     = AkrobatikflÃ¤che (nur Akrobaten, 1,6Ã Tempo)
-//   blocking = unÃ¼berwindbares Hindernis (Ã¼berschreibt alles)
+//   walk     = normale Lauffläche (alle)
+//   climb    = Kletterfläche (nur Kletterer/Akrobaten, 0,55× Tempo)
+//   acro     = Akrobatikfläche (nur Akrobaten, 1,6× Tempo)
+//   blocking = unüberwindbares Hindernis (überschreibt alles)
 //   hide     = Versteck
 //   block    = Sichtblocker
 //   start    = Startregion (Spawn + Flucht)
 //   goal     = Zielregion (Gold)
 //   interact = Interaktionsobjekt (Strg+Klick triggert Effekt, wenn Figur darin steht)
-//   paths    = benannte Wachenpfade (Polylinien) + GeheimgÃ¤nge/SprÃ¼nge sind hier editierbar
-//   fx       = freie FlÃ¤chen ohne Spielfunktion â nur Markierung/Referenz fÃ¼r Effekte
+//   paths    = benannte Wachenpfade (Polylinien) + Geheimgänge/Sprünge sind hier editierbar
+//   fx       = freie Flächen ohne Spielfunktion – nur Markierung/Referenz für Effekte
 //              (z. B. als knock-Ziele oder zur Planung; beeinflussen weder Bewegung noch Sicht)
 
 const LAYER_NAMES = ["walk", "climb", "acro", "hide", "blocking", "block", "interact", "paths", "fx", "start", "goal"];
@@ -375,7 +376,7 @@ function polyBBox(poly) {
   return { x0, y0, x1, y1 };
 }
 
-// PrÃ¼ft, ob zwei Polygone Ã¼ber einen Ãbergang (TÃ¼r/Sprung) verknÃ¼pft sind
+// Prüft, ob zwei Polygone über einen Übergang (Tür/Sprung) verknüpft sind
 function linkViaTransition(map, ia, ib, ch) {
   for (const tr of map.markers.transitions ?? []) {
     if (tr.type === "jump" && !(ch && ch.canAcro)) continue;
@@ -386,8 +387,8 @@ function linkViaTransition(map, ia, ib, ch) {
   return false;
 }
 
-// Zwei Polygone gelten als verbunden, wenn sie groÃzÃ¼gig aneinander grenzen
-// oder durch einen Ãbergang (TÃ¼r fÃ¼r alle, Sprung nur Akrobaten) verknÃ¼pft sind.
+// Zwei Polygone gelten als verbunden, wenn sie großzügig aneinander grenzen
+// oder durch einen Übergang (Tür für alle, Sprung nur Akrobaten) verknüpft sind.
 function polysConnected(map, ia, ib, ch) {
   if (ia === ib) return true;
   if (ia < 0 || ib < 0) return false;
@@ -403,7 +404,7 @@ function polysConnected(map, ia, ib, ch) {
 function pointWalkable(map, p, ch) {
   if (inAnyPoly(map.layers.blocking ?? [], p)) return false;
   if (inAnyPoly(map.layers.walk ?? [], p)) return true;
-  // Klettern: Kletterer und Akrobaten (Akrobatik schlieÃt Klettern ein)
+  // Klettern: Kletterer und Akrobaten (Akrobatik schließt Klettern ein)
   if (inAnyPoly(map.layers.climb ?? [], p)) return !!(ch && (ch.canClimb || ch.canAcro));
   if (inAnyPoly(map.layers.acro ?? [], p)) return !!(ch && ch.canAcro);
   return false;
@@ -472,10 +473,58 @@ function nearestWalkable(map, p, ch) {
   return null;
 }
 
-// ---------- Navigation: Sichtbarkeitsgraph Ã¼ber Polygonen ----------
+// ---------- Navigation: Sichtbarkeitsgraph über Polygonen ----------
+
+// Douglas-Peucker für geschlossene Polygone: Index 0 bleibt Fixpunkt,
+// die Kette 1..n-1 wird vereinfacht, Schlusskante n-1 -> 0 bleibt erhalten.
+// Liefert mindestens ein Dreieck zurück.
+function simplifyPolyDP(pts, tol) {
+  const n = pts.length;
+  if (n < 4 || tol <= 0) return pts.map((p) => ({ ...p }));
+  const perp = (p, a, b) => {
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const L = Math.hypot(dx, dy);
+    if (!L) return Math.hypot(p.x - a.x, p.y - a.y);
+    return Math.abs(dy * (p.x - a.x) - dx * (p.y - a.y)) / L;
+  };
+  const dp = (lo, hi, keep) => {
+    let worst = -1;
+    let d = -1;
+    for (let i = lo + 1; i < hi; i++) {
+      const q = perp(pts[i], pts[lo], pts[hi]);
+      if (q > d) {
+        d = q;
+        worst = i;
+      }
+    }
+    if (d > tol) {
+      keep.add(worst);
+      dp(lo, worst, keep);
+      dp(worst, hi, keep);
+    }
+  };
+  const keep = new Set([0, n - 1]);
+  dp(0, n - 1, keep);
+  // Endpunkt n-1 liegt oft kollinear zur Schlusskante (letzter Punkt -> pts[0])
+  // und wäre redundant – dann verwerfen.
+  const perpEnd = (() => {
+    const prev = [...keep].filter((i) => i !== n - 1).sort((a, b) => a - b).pop();
+    if (prev == null) return Infinity;
+    const dx = pts[0].x - pts[prev].x;
+    const dy = pts[0].y - pts[prev].y;
+    const L = Math.hypot(dx, dy);
+    if (!L) return Infinity;
+    return Math.abs(dy * (pts[n - 1].x - pts[prev].x) - dx * (pts[n - 1].y - pts[prev].y)) / L;
+  })();
+  if (perpEnd <= tol) keep.delete(n - 1);
+  const out = [...keep].sort((a, b) => a - b).map((i) => ({ ...pts[i] }));
+  if (out.length < 3) return pts.map((p) => ({ ...p }));
+  return out;
+}
 
 function buildNav(map, ch, useTransitions) {
-  // Knoten = Polygonzentren + Eckpunkte, jeweils mit PolygonzugehÃ¶rigkeit
+  // Knoten = Polygonzentren + Eckpunkte, jeweils mit Polygonzugehörigkeit
   const polys = movePolys(map).filter((p) => p && p.pts.length >= 3);
   const bboxes = polys.map((poly) => {
     let x0 = Infinity;
@@ -493,15 +542,23 @@ function buildNav(map, ch, useTransitions) {
 
   const nodes = [];
   polys.forEach((poly, pi) => {
-    nodes.push({ x: 0, y: 0, pi }); // Zentrum wird unten ersetzt
-    nodes[nodes.length - 1] = { ...centroid(poly.pts), pi };
-    for (const p of poly.pts) nodes.push({ x: p.x, y: p.y, pi });
+    // Knoten aus vereinfachter Kontur (Douglas-Peucker, fein): Indizes bleiben
+    // stabil, nur die Knotenzahl sinkt. Original-Polygone bleiben Quelle der
+    // Wahrheit für Begehbarkeit/Portale.
+    const spts = simplifyPolyDP(poly.pts, 1.5);
+    nodes.push({ ...centroid(spts), pi });
+    for (const p of spts) nodes.push({ x: p.x, y: p.y, pi });
   });
-  // Fragment-Knoten: blocking-Polygone kÃ¶nnen ein LaufflÃ¤chen-Polygon zerschneiden.
+  // Fragment-Knoten: blocking-Polygone können ein Laufflächen-Polygon zerschneiden.
   // Dann liegen Zentrum und Ecken evtl. im gesperrten Teil und das begehbare
-  // ReststÃ¼ck hÃ¤tte keinen Knoten. FÃ¼r betroffene Polygone daher zusÃ¤tzliche
+  // Reststück hätte keinen Knoten. Für betroffene Polygone daher zusätzliche
   // Rasterpunkte setzen (nur begehbare).
   const blockings = (map.layers.blocking ?? []).filter((b) => b && b.pts.length >= 3);
+  // Rasterweite skaliert mit der Kartengröße, damit Riesenkarten (bis 20000 px)
+  // nicht quadratisch mehr Knoten erzeugen:
+  const diag = Math.hypot(map.world.w, map.world.h);
+  const fragStep = Math.max(70, Math.round(diag / 42));
+  const ringSpacing = Math.max(26, Math.round(diag / 110));
   if (blockings.length) {
     const blockBBs = blockings.map(polyBBox);
     polys.forEach((poly, pi) => {
@@ -510,21 +567,21 @@ function buildNav(map, ch, useTransitions) {
         (b2) => bb.x0 <= b2.x1 && b2.x0 <= bb.x1 && bb.y0 <= b2.y1 && b2.y0 <= bb.y1,
       );
       if (!cut) return;
-      const step = 70;
-      for (let gx = bb.x0 + step / 2; gx < bb.x1; gx += step) {
-        for (let gy = bb.y0 + step / 2; gy < bb.y1; gy += step) {
+      for (let gx = bb.x0 + fragStep / 2; gx < bb.x1; gx += fragStep) {
+        for (let gy = bb.y0 + fragStep / 2; gy < bb.y1; gy += fragStep) {
           if (!pointInPoly(gx, gy, poly.pts)) continue;
           if (!pointWalkable(map, { x: gx, y: gy }, ch)) continue;
           nodes.push({ x: gx, y: gy, pi });
         }
       }
     });
-    // Ring-Knoten um jedes blocking-Polygon: Punkte knapp auÃerhalb der
-    // Kanten landen in jedem angrenzenden begehbaren Fragment â auch in
+    // Ring-Knoten um jedes blocking-Polygon: Punkte knapp außerhalb der
+    // Kanten landen in jedem angrenzenden begehbaren Fragment – auch in
     // schmalen Schlitzen, die das Raster verpasst.
+    const movePolysCache = movePolys(map);
     const ringPoint = (x, y) => {
       if (!pointWalkable(map, { x, y }, ch)) return;
-      const pi2 = movePolys(map).findIndex((mp) => pointInPoly(x, y, mp.pts));
+      const pi2 = movePolysCache.findIndex((mp) => pointInPoly(x, y, mp.pts));
       if (pi2 >= 0) nodes.push({ x, y, pi: pi2 });
     };
     for (const b of blockings) {
@@ -538,7 +595,7 @@ function buildNav(map, ch, useTransitions) {
         if (!L) continue;
         const nx = -ey / L;
         const ny = ex / L;
-        const n = Math.max(2, Math.ceil(L / 26));
+        const n = Math.max(2, Math.ceil(L / ringSpacing));
         for (let k = 0; k < n; k++) {
           const t = k / n;
           const px = a.x + ex * t;
@@ -555,23 +612,57 @@ function buildNav(map, ch, useTransitions) {
     nodes.push({ x: t.to.x, y: t.to.y, pi: -1 });
   }
   const adj = nodes.map(() => []);
-  for (let i = 0; i < nodes.length; i++)
-    for (let j = i + 1; j < nodes.length; j++) {
-      const a = nodes[i];
-      const b = nodes[j];
-      // Kanten nur innerhalb desselben Polygons oder zwischen groÃzÃ¼gig
-      // benachbarten bzw. Ã¼ber ÃbergÃ¤nge verbundenen Polygonen
-      if (a.pi !== b.pi) {
-        const d = Math.hypot(b.x - a.x, b.y - a.y);
-        if (d > 1200) continue;
-        if (!polysConnected(map, a.pi, b.pi, ch)) continue;
-      }
-      if (segWalkable(map, a, b, ch)) {
-        adj[i].push({ to: j, type: null });
-        adj[j].push({ to: i, type: null });
-      }
+  // Kanten: innerhalb eines Polygons alle Paare; über Polygon-Grenzen nur
+  // großzügig benachbarte bzw. über Übergänge verbundene Polygone. Knoten
+  // werden dafür in Rasterzellen (1200 px) einsortiert – sonst wäre die
+  // Kantensuche quadratisch und Riesenkarten würden Speicher/Zeit sprengen.
+  const MAX_EDGE = 1200;
+  const CELL = MAX_EDGE;
+  const cells = new Map();
+  const piGroups = new Map();
+  nodes.forEach((nd, idx) => {
+    const ck = Math.floor(nd.x / CELL) + "|" + Math.floor(nd.y / CELL);
+    const cb = cells.get(ck);
+    if (cb) cb.push(idx);
+    else cells.set(ck, [idx]);
+    if (nd.pi >= 0) {
+      const pb = piGroups.get(nd.pi);
+      if (pb) pb.push(idx);
+      else piGroups.set(nd.pi, [idx]);
     }
-  // ÃbergÃ¤nge: TÃ¼ren fÃ¼r alle, SprÃ¼nge nur fÃ¼r Akrobaten
+  });
+  const tryEdge = (i, j) => {
+    const a = nodes[i];
+    const b = nodes[j];
+    if (a.pi !== b.pi) {
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      if (dx > MAX_EDGE || dx < -MAX_EDGE || dy > MAX_EDGE || dy < -MAX_EDGE) return;
+      if (!polysConnected(map, a.pi, b.pi, ch)) return;
+    }
+    if (segWalkable(map, a, b, ch)) {
+      adj[i].push({ to: j, type: null });
+      adj[j].push({ to: i, type: null });
+    }
+  };
+  for (const bucket of piGroups.values())
+    for (let x = 0; x < bucket.length; x++)
+      for (let y = x + 1; y < bucket.length; y++) tryEdge(bucket[x], bucket[y]);
+  for (let i = 0; i < nodes.length; i++) {
+    const a = nodes[i];
+    const gx = Math.floor(a.x / CELL);
+    const gy = Math.floor(a.y / CELL);
+    for (let ox = -1; ox <= 1; ox++)
+      for (let oy = -1; oy <= 1; oy++) {
+        const bucket = cells.get(gx + ox + "|" + gy + oy);
+        if (!bucket) continue;
+        for (const j of bucket) {
+          if (j <= i || nodes[j].pi === a.pi) continue;
+          tryEdge(i, j);
+        }
+      }
+  }
+  // Übergänge: Türen für alle, Sprünge nur für Akrobaten
   const base = nodes.length - trans.length * 2;
   trans.forEach((t, k) => {
     if (t.type !== "door" && !(ch && ch.canAcro)) return;
@@ -591,7 +682,7 @@ function smoothPath(map, path, ch) {
   let i = 0;
   while (i < path.length - 1) {
     let j = path.length - 1;
-    if (path[j].seg) j = i + 1; // Ãbergangskanten nicht Ã¼berspringen
+    if (path[j].seg) j = i + 1; // Übergangskanten nicht überspringen
     for (; j > i + 1; j--) {
       if (path[j].seg) continue;
       if (segWalkable(map, path[i], path[j], ch)) break;
@@ -656,7 +747,7 @@ function findPath(map, nav, from, to, ch) {
     path.unshift({ x: pts[cur].x, y: pts[cur].y, seg: etype[cur] });
     cur = prev[cur];
   }
-  return smoothPath(map, path, ch);
+  return funnelPath(map, path, ch);
 }
 
 // ---------- Standardkarte (an die Bildkomposition angelehnt) ----------
@@ -683,7 +774,7 @@ function defaultMap(w, h) {
   const off = (p, s, d) => ({ x: p.x + nx * s * d, y: p.y + ny * s * d });
 
   const road = {
-    name: "LandstraÃe",
+    name: "Landstraße",
     pts: [
       off(roadA, 1, roadHalf),
       off(roadB, 1, roadHalf),
@@ -712,18 +803,18 @@ function defaultMap(w, h) {
     ],
   };
   const trees = [
-    { name: "WaldstÃ¼ck", pts: octagon(0.36 * w, 0.3 * h, 0.045 * w) },
-    { name: "WaldstÃ¼ck", pts: octagon(0.56 * w, 0.66 * h, 0.045 * w) },
-    { name: "WaldstÃ¼ck", pts: octagon(0.24 * w, 0.52 * h, 0.04 * w) },
+    { name: "Waldstück", pts: octagon(0.36 * w, 0.3 * h, 0.045 * w) },
+    { name: "Waldstück", pts: octagon(0.56 * w, 0.66 * h, 0.045 * w) },
+    { name: "Waldstück", pts: octagon(0.24 * w, 0.52 * h, 0.04 * w) },
   ];
 
-  // Akrobatik-DÃ¤cher: eines grenzt an die StraÃe, das andere nur per Sprung erreichbar
+  // Akrobatik-Dächer: eines grenzt an die Straße, das andere nur per Sprung erreichbar
   const roofAC = off(roadAt(0.56), 1, roadHalf + 0.03 * h);
   const roofBC = off(roadAt(0.7), -1, roadHalf + 0.18 * h);
   const roofA = { name: "Marktdach", pts: octagon(roofAC.x, roofAC.y, 0.055 * h) };
   const roofB = { name: "Marktdach", pts: octagon(roofBC.x, roofBC.y, 0.055 * h) };
 
-  // Blockierende Zone: Bachlauf, den niemand Ã¼berqueren kann
+  // Blockierende Zone: Bachlauf, den niemand überqueren kann
   const streamC = off(roadAt(0.38), -1, roadHalf + 0.13 * h);
   const stream = {
     name: "Bach",
@@ -752,7 +843,7 @@ function defaultMap(w, h) {
         {
           name: "Wegweiser",
           pts: octagon(villageC.x + 0.05 * w, villageC.y - 0.12 * h, 26),
-          effect: { type: "msg", text: "Wegweiser: Der Sheriff bewacht den Burghof. Ã¼ber die DÃ¤cher kommt man ihm nÃ¤her.", once: false },
+          effect: { type: "msg", text: "Wegweiser: Der Sheriff bewacht den Burghof. über die Dächer kommt man ihm näher.", once: false },
         },
         {
           name: "Waffenkammer",
@@ -760,7 +851,7 @@ function defaultMap(w, h) {
           effect: { type: "weapon" },
         },
         {
-          name: "KrÃ¤uterbeet",
+          name: "Kräuterbeet",
           pts: octagon(roadAt(0.3).x, roadAt(0.3).y - roadHalf - 0.05 * h, 30),
           effect: { type: "stamina", once: true },
         },
@@ -815,9 +906,11 @@ function scaleMap(map, nw, nh) {
     ),
     markers: {
       guards: map.markers.guards.map((gd) =>
-        gd.type === "pacer"
-          ? { type: "pacer", a: sp(gd.a), b: sp(gd.b), weapon: gd.weapon, skill: gd.skill, attentive: gd.attentive }
-          : { type: "sentry", post: sp(gd.post), look: sp(gd.look), weapon: gd.weapon, skill: gd.skill, attentive: gd.attentive },
+        gd.type === "pacer" && gd.path
+          ? { ...gd }
+          : gd.type === "pacer"
+            ? { type: "pacer", a: sp(gd.a), b: sp(gd.b), weapon: gd.weapon, skill: gd.skill, attentive: gd.attentive }
+            : { type: "sentry", post: sp(gd.post), look: sp(gd.look), weapon: gd.weapon, skill: gd.skill, attentive: gd.attentive },
       ),
       transitions: (map.markers.transitions ?? []).map((tr) => ({
         type: tr.type,
@@ -895,9 +988,9 @@ function newGame(map) {
     { x: -10, y: 32 },
   ];
   const charDefs = [
-    { id: "robin", name: "Robin", role: "Erfahrener Krieger Â· klettert Â· EinhÃ¤nder", color: "#2f7d32", speed: 132, sneakSpeed: 72, koRange: 46, canClimb: true, stamina: 100, skill: "veteran", weapon: { cat: "sword", tier: "std" } },
-    { id: "john", name: "Little John", role: "Erfahrener Krieger Â· Morgenstern", color: "#6b4f2a", speed: 118, sneakSpeed: 64, koRange: 72, stamina: 120, skill: "veteran", weapon: { cat: "heavy", tier: "heavy" } },
-    { id: "marian", name: "Marian", role: "KÃ¤mpferin light Â· Akrobatin (klettert auch) Â· Dolch", color: "#3b6fa0", speed: 152, sneakSpeed: 82, koRange: 44, canAcro: true, canClimb: true, stamina: 80, skill: "green", weapon: { cat: "sword", tier: "light" } },
+    { id: "robin", name: "Robin", role: "Erfahrener Krieger · klettert · Einhänder", color: "#2f7d32", speed: 132, sneakSpeed: 72, koRange: 46, canClimb: true, stamina: 100, skill: "veteran", weapon: { cat: "sword", tier: "std" } },
+    { id: "john", name: "Little John", role: "Erfahrener Krieger · Morgenstern", color: "#6b4f2a", speed: 118, sneakSpeed: 64, koRange: 72, stamina: 120, skill: "veteran", weapon: { cat: "heavy", tier: "heavy" } },
+    { id: "marian", name: "Marian", role: "Kämpferin light · Akrobatin (klettert auch) · Dolch", color: "#3b6fa0", speed: 152, sneakSpeed: 82, koRange: 44, canAcro: true, canClimb: true, stamina: 80, skill: "green", weapon: { cat: "sword", tier: "light" } },
   ];
   const chars = charDefs.map((cd, i) => {
     const raw = { x: esc.x + startOffsets[i].x, y: esc.y + startOffsets[i].y };
@@ -1017,22 +1110,28 @@ function newGame(map) {
 
 // ---------- Spiellogik ----------
 
-// Kartenwechsel: baut neues Spiel auf neuer Karte, Ã¼bernimmt Charakter-Fortschritt
+// Kartenwechsel: baut neues Spiel auf neuer Karte, übernimmt Charakter-Fortschritt
 function applyMapChange(g) {
   const key = g.pendingMap;
   g.pendingMap = null;
   if (!key) return false;
   let nextMap = null;
+  let nextId = null;
   if (typeof key === "string") {
     const entry = (g.mapPool ?? {})[key];
     if (typeof entry === "function") nextMap = entry();
-    else if (entry) nextMap = entry;
+    else if (entry && entry.map) {
+      // Spiel-Sammlung: { id, map, name } aus dem geladenen Spiel
+      nextMap = entry.map;
+      nextId = entry.id;
+    } else if (entry) nextMap = entry;
   } else if (key && key.layers) {
     nextMap = key;
   }
   if (!nextMap || !nextMap.layers || !nextMap.layers.walk) return false;
+  if (nextId) g.mapId = nextId;
   const ng = newGame(nextMap);
-  // Charakter-Fortschritt Ã¼bernehmen (Position wird neu gesetzt)
+  // Charakter-Fortschritt übernehmen (Position wird neu gesetzt)
   for (const nc of ng.chars) {
     const oc = g.chars.find((c) => c.id === nc.id);
     if (!oc) continue;
@@ -1053,15 +1152,246 @@ function applyMapChange(g) {
   return true;
 }
 
-// Navigationen lazy: erst bauen, wenn tatsÃ¤chlich ein Weg gesucht wird
+// ---------- Funnel-Pfadmodell ----------
+// Statt Wegpunkte nur an Graphknoten (Polygonzentren/-ecken) zu glätten, wird
+// der Polygon-Korridor des A*-Pfads extrahiert und mit String-Pulling
+// (Simple-Stupid-Funnel) durch die gemeinsamen Kanten (Portale) der Laufflächen
+// gezogen. Ergebnis: nahezu optimale Pfade, die Ecken abschneiden, statt an
+// Knoten zu zickzacken. Jede Teilstrecke wird mit segWalkable validiert;
+// schlägt etwas fehl (Überlappung statt gemeinsamer Kante, Fehlorientierung),
+// fällt das Stück auf die alte greedy-Glättung zurück.
+
+function triarea(a, b, c) {
+  return (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+}
+
+// Längster kolinearer Überlappungs-Abschnitt zwischen Kante p-q und Kante r-s
+function segOverlapOnLine(p, q, r, s, eps) {
+  const dx = q.x - p.x;
+  const dy = q.y - p.y;
+  const L1 = Math.hypot(dx, dy);
+  if (!L1) return null;
+  const tol = eps * L1;
+  const cr = (r.x - p.x) * dy - (r.y - p.y) * dx;
+  const cs = (s.x - p.x) * dy - (s.y - p.y) * dx;
+  if (Math.abs(cr) > tol || Math.abs(cs) > tol) return null;
+  const t = (pt) => ((pt.x - p.x) * dx + (pt.y - p.y) * dy) / (L1 * L1);
+  let t1 = t(r);
+  let t2 = t(s);
+  if (t1 > t2) [t1, t2] = [t2, t1];
+  const lo = Math.max(t1, 0);
+  const hi = Math.min(t2, 1);
+  if (hi - lo < 1e-6) return null;
+  return {
+    a: { x: p.x + dx * lo, y: p.y + dy * lo },
+    b: { x: p.x + dx * hi, y: p.y + dy * hi },
+  };
+}
+
+const portalCache = new WeakMap();
+
+// Gemeinsame Kante (Portal) zwischen zwei Laufflächen; null wenn nur Überlappung
+function portalBetween(map, ia, ib) {
+  let m = portalCache.get(map);
+  if (!m) {
+    m = new Map();
+    portalCache.set(map, m);
+  }
+  const key = ia < ib ? ia + "|" + ib : ib + "|" + ia;
+  if (m.has(key)) return m.get(key);
+  const polys = movePolys(map);
+  const A = polys[ia];
+  const B = polys[ib];
+  let best = null;
+  let bestLen = -1;
+  const eps = 0.75;
+  for (let i = 0; i < A.pts.length; i++) {
+    const p = A.pts[i];
+    const q = A.pts[(i + 1) % A.pts.length];
+    for (let j = 0; j < B.pts.length; j++) {
+      const r = B.pts[j];
+      const s = B.pts[(j + 1) % B.pts.length];
+      const ov = segOverlapOnLine(p, q, r, s, eps);
+      if (ov) {
+        const len = Math.hypot(ov.b.x - ov.a.x, ov.b.y - ov.a.y);
+        if (len > bestLen) {
+          bestLen = len;
+          best = ov;
+        }
+      }
+    }
+  }
+  m.set(key, best);
+  return best;
+}
+
+// Simple-Stupid-Funnel. portals: [leftPoint, rightPoint][] (rechts der Fahrtrichtung orientiert)
+function runFunnel(start, end, portals) {
+  const P = portals.concat([[end, end]]);
+  const n = P.length;
+  const out = [];
+  let apex = start;
+  let lp = P[0][0];
+  let rp = P[0][1];
+  let li = 0;
+  let ri = 0;
+  let i = 1;
+  let iter = 0;
+  const maxIter = 4 * n + 16;
+  while (i < n && iter++ < maxIter) {
+    const la = P[i][0];
+    const ra = P[i][1];
+    // Rechte Schiene verengt?
+    if (triarea(apex, rp, ra) <= 0) {
+      if (triarea(apex, lp, ra) <= 0) {
+        // links gekreuzt: Apex auf linke Schiene vorziehen
+        out.push(lp);
+        apex = lp;
+        i = li + 1;
+        lp = P[i][0];
+        rp = P[i][1];
+        li = ri = i;
+        continue;
+      }
+      rp = ra;
+      ri = i;
+    }
+    // Linke Schiene verengt?
+    if (triarea(apex, lp, la) >= 0) {
+      if (triarea(apex, rp, la) >= 0) {
+        // rechts gekreuzt: Apex auf rechte Schiene vorziehen
+        out.push(rp);
+        apex = rp;
+        i = ri + 1;
+        lp = P[i][0];
+        rp = P[i][1];
+        li = ri = i;
+        continue;
+      }
+      lp = la;
+      li = i;
+    }
+    i++;
+  }
+  if (iter >= maxIter) return null;
+  out.push(end);
+  return out;
+}
+
+// Ein pfadstück (ohne Übergangsknoten) durch den Polygon-Korridor funneln
+function funnelPiece(map, piece, ch) {
+  if (piece.length < 3) return piece;
+  const corridor = [];
+  for (const p of piece) {
+    if (p.pi == null || p.pi < 0) continue;
+    if (corridor[corridor.length - 1] !== p.pi) corridor.push(p.pi);
+  }
+  const startPi = walkPolyIndexAt(map, piece[0]);
+  const endPi = walkPolyIndexAt(map, piece[piece.length - 1]);
+  if (endPi >= 0 && corridor[corridor.length - 1] !== endPi) corridor.push(endPi);
+  if (startPi >= 0 && corridor[0] !== startPi) corridor.unshift(startPi);
+  if (corridor.length < 2) return smoothPath(map, piece, ch);
+  const polys = movePolys(map);
+  const centers = corridor.map((pi) => centroid(polys[pi].pts));
+  const portals = [];
+  for (let i = 0; i + 1 < corridor.length; i++) {
+    const portal = portalBetween(map, corridor[i], corridor[i + 1]);
+    if (!portal) return smoothPath(map, piece, ch);
+    // Orientierung: linker Punkt = links der Fahrtrichtung (Zentroid i -> i+1)
+    const dx = centers[i + 1].x - centers[i].x;
+    const dy = centers[i + 1].y - centers[i].y;
+    const ca = dx * (portal.a.y - centers[i].y) - dy * (portal.a.x - centers[i].x);
+    portals.push(ca >= 0 ? [portal.a, portal.b] : [portal.b, portal.a]);
+  }
+  const fun = runFunnel(piece[0], piece[piece.length - 1], portals);
+  if (!fun) return smoothPath(map, piece, ch);
+  for (let i = 0; i + 1 < fun.length; i++)
+    if (!segWalkable(map, fun[i], fun[i + 1], ch)) return smoothPath(map, piece, ch);
+  return fun;
+}
+
+// Gesamten Pfad an Übergängen (Tür/Sprung) zerlegen und stückweise funneln.
+// Abschließend Shortcut-Pass: sind zwei Punkte um einen Übergang herum direkt
+// begehbar, darf er übersprungen werden (altes Verhalten – Türen sind
+// Abkürzungen, keine Pflicht).
+function funnelPath(map, path, ch) {
+  if (path.length < 3) return path;
+  const out = [];
+  let piece = [];
+  for (const p of path) {
+    if (p.seg) {
+      if (piece.length) {
+        out.push(...funnelPiece(map, piece, ch));
+        piece = [];
+      }
+      out.push(p);
+    } else {
+      piece.push(p);
+    }
+  }
+  if (piece.length) out.push(...funnelPiece(map, piece, ch));
+  return smoothPath(map, out, ch);
+}
+// ---------- Gebackene Navmeshes (Editor) ----------
+// Nav ist nicht karteneindeutig, sondern profilabhängig: Wachen (Boden, ohne
+// Übergänge), Bodenfiguren, Kletterer und Akrobaten (mit Übergängen) bekommen
+// jeweils eigene Graphen. Der Editor backt alle vier vorweg und speichert sie
+// samt rev-Prüfsumme auf der Karte; die Runtime lädt sie, statt selbst zu
+// rechnen. Stimmt die Prüfsumme nicht (Karte nachträglich geändert, altes
+// JSON), wird wie bisher on-demand gebaut.
+
+const NAV_KEYS = ["guard", "ground", "climber", "acrobat"];
+
+function navRev(map) {
+  const data = JSON.stringify([
+    "nav-v2", // Portale sind seit v2 NICHT mehr Teil der Navigation
+    map.world,
+    map.layers,
+    { guards: map.markers?.guards ?? null, transitions: map.markers?.transitions ?? null },
+  ]);
+  let h = 5381;
+  for (let i = 0; i < data.length; i++) h = ((h * 33) ^ data.charCodeAt(i)) >>> 0;
+  return h.toString(36);
+}
+
+function navKeyForChar(c) {
+  if (c.canAcro) return "acrobat";
+  if (c.canClimb) return "climber";
+  return "ground";
+}
+
+function buildNavFor(map, key) {
+  // Übergänge (Portale) sind seit v2 NICHT mehr Teil der Navigationsgraphen:
+  // Der Spieler betritt ein Portal im Spiel und wählt einen Ausgang. Die
+  // Graphen enthalten daher für alle Profile nur begehbare Flächen.
+  switch (key) {
+    case "guard":
+      return buildNav(map, null, false);
+    case "ground":
+      return buildNav(map, { canClimb: false, canAcro: false }, false);
+    case "climber":
+      return buildNav(map, { canClimb: true, canAcro: false }, false);
+    default:
+      return buildNav(map, { canClimb: true, canAcro: true }, false);
+  }
+}
+
+function loadNav(g, key, c) {
+  const nm = g.map.navMesh;
+  if (nm && nm.rev === navRev(g.map) && nm.navs && nm.navs[key]) return nm.navs[key];
+  return buildNavFor(g.map, key);
+}
+
+// Navigationen lazy: erst bauen/laden, wenn tatsächlich ein Weg gesucht wird
 function getGuardNav(g) {
-  if (!g.nav) g.nav = buildNav(g.map, null, false);
+  if (!g.nav) g.nav = loadNav(g, "guard", null);
   return g.nav;
 }
 
 function getCharNav(g, c) {
-  if (!g.charNavs[c.id]) g.charNavs[c.id] = buildNav(g.map, c, true);
-  return g.charNavs[c.id];
+  const key = navKeyForChar(c);
+  if (!g.charNavs[key]) g.charNavs[key] = loadNav(g, key, c);
+  return g.charNavs[key];
 }
 
 // ---------- Interaktionsobjekte ----------
@@ -1070,18 +1400,18 @@ const INTERACT_TYPES = {
   msg: "Hinweis / Text",
   weapon: "Waffen-Upgrade (Figur im Polygon)",
   stamina: "Ausdauer auffrischen (alle)",
-  knock: "Wachen betÃ¤uben (Radius)",
-  alarm: "Falle: Alarm auslÃ¶sen",
+  knock: "Wachen betäuben (Radius)",
+  alarm: "Falle: Alarm auslösen",
   item: "Item einsammeln",
-  map: "Karte wechseln",
-  guardShift: "Wachen: Pfade/Posten Ã¤ndern",
-  noise: "KÃ¶der: GerÃ¤usch an Position",
+  map: "Karte wechseln (Ziel aus Spielsammlung)",
+  guardShift: "Wachen: Pfade/Posten ändern",
+  noise: "Köder: Geräusch an Position",
   stealth: "Verkleidung: kurz unentdeckbar",
 };
 const TIER_ORDER = ["light", "std", "heavy"];
 
-// FÃ¼hrt den Effekt eines Interaktions-Polygons aus.
-// Aufrufer prÃ¼ft: Figur steht im Polygon, Strg+Klick traf das Polygon.
+// Führt den Effekt eines Interaktions-Polygons aus.
+// Aufrufer prüft: Figur steht im Polygon, Strg+Klick traf das Polygon.
 function runInteraction(g, poly, ch, pushMessage) {
   const eff = poly.effect ?? { type: "msg", text: "Nichts passiert." };
   switch (eff.type) {
@@ -1095,22 +1425,22 @@ function runInteraction(g, poly, ch, pushMessage) {
         ch.weapon = { ...ch.weapon, tier: next };
         pushMessage(`${ch.name} findet ${WEAPON_LISTS[ch.weapon.cat]?.[next] ?? "eine bessere Waffe"}!`);
       } else {
-        pushMessage(`${ch.name} trÃ¤gt bereits die beste Waffe.`);
+        pushMessage(`${ch.name} trägt bereits die beste Waffe.`);
       }
       break;
     }
     case "stamina": {
       if (eff.scope === "self") {
         ch.stamina = ch.maxStamina;
-        pushMessage(`${ch.name} frischt den Mut auf â Ausdauer voll.`);
+        pushMessage(`${ch.name} frischt den Mut auf – Ausdauer voll.`);
       } else {
         for (const c of g.chars) if (!c.caught) c.stamina = c.maxStamina;
-        pushMessage("Alle frischen Mut gemacht â Ausdauer voll.");
+        pushMessage("Alle frischen Mut gemacht – Ausdauer voll.");
       }
       break;
     }
     case "knock": {
-      // Ziel-Polygone auflÃ¶sen: eigenes Polygon + optional weitere (targets)
+      // Ziel-Polygone auflösen: eigenes Polygon + optional weitere (targets)
       const targetPtSets = [];
       const addTarget = (t) => {
         if (t && t.pts) targetPtSets.push(t.pts);
@@ -1135,7 +1465,7 @@ function runInteraction(g, poly, ch, pushMessage) {
       }
       let n = 0;
       if (eff.area === "poly" || (eff.targets ?? []).length) {
-        // Wachen in einem der Zielpolygone werden betÃ¤ubt
+        // Wachen in einem der Zielpolygone werden betäubt
         for (const guard of g.guards) {
           if (guard.state === "knocked") continue;
           if (targetPtSets.some((pts) => pointInPoly(guard.x, guard.y, pts))) {
@@ -1166,7 +1496,7 @@ function runInteraction(g, poly, ch, pushMessage) {
     }
     case "alarm": {
       // Optional nur bestimmte Wachen: per Index-Liste oder Zielpolygone
-      // (z. B. fx-FlÃ¤chen). Ohne Angabe werden alle alarmiert.
+      // (z. B. fx-Flächen). Ohne Angabe werden alle alarmiert.
       const byIndex = new Set(eff.guards ?? []);
       const hasSpec = byIndex.size > 0 || (eff.targets ?? []).length > 0;
       const targetPtSets = [];
@@ -1192,7 +1522,7 @@ function runInteraction(g, poly, ch, pushMessage) {
         guard.lastSeen = { x: ch.x, y: ch.y, at: g.time };
         n++;
       }
-      pushMessage(n ? `Eine Glocke ertÃ¶nt â ${n} Wache${n > 1 ? "n" : ""} auf Alarm!` : "Eine Glocke ertÃ¶nt â aber niemand hÃ¶rt sie.");
+      pushMessage(n ? `Eine Glocke ertönt – ${n} Wache${n > 1 ? "n" : ""} auf Alarm!` : "Eine Glocke ertönt – aber niemand hört sie.");
       break;
     }
     case "item":
@@ -1201,8 +1531,8 @@ function runInteraction(g, poly, ch, pushMessage) {
       break;
     case "map":
       g.pendingMap = eff.map ?? eff.text ?? null;
-      if (!g.pendingMap) pushMessage("Diese TÃ¼r fÃ¼hrt nirgendwohin.");
-      else pushMessage("Ihr schreitet durch â¦");
+      if (!g.pendingMap) pushMessage("Diese Tür führt nirgendwohin.");
+      else pushMessage("Ihr schreitet durch …");
       break;
     case "guardShift": {
       const shifts = eff.assign ?? eff.guards ?? [];
@@ -1232,7 +1562,7 @@ function runInteraction(g, poly, ch, pushMessage) {
         }
         guard.path = [];
       }
-      pushMessage(eff.text ?? "Drinnen regt sich etwas â die Wachen verteilen sich neu.");
+      pushMessage(eff.text ?? "Drinnen regt sich etwas – die Wachen verteilen sich neu.");
       break;
     }
     case "noise": {
@@ -1251,12 +1581,12 @@ function runInteraction(g, poly, ch, pushMessage) {
         }
       }
       g.noiseFx = { x: at.x, y: at.y, t: 0 };
-      pushMessage(n ? `Ein GerÃ¤usch lockt ${n} Wache${n > 1 ? "n" : ""} fort.` : "Ein GerÃ¤usch â aber keine Wache hÃ¶rt es.");
+      pushMessage(n ? `Ein Geräusch lockt ${n} Wache${n > 1 ? "n" : ""} fort.` : "Ein Geräusch – aber keine Wache hört es.");
       break;
     }
     case "stealth":
       g.stealthUntil = g.time + (eff.duration ?? 12);
-      pushMessage(eff.text ?? `Verkleidung! FÃ¼r ${Math.round(eff.duration ?? 12)} Sekunden sieht euch keine Wache.`);
+      pushMessage(eff.text ?? `Verkleidung! Für ${Math.round(eff.duration ?? 12)} Sekunden sieht euch keine Wache.`);
       break;
     default:
       pushMessage("Nichts passiert.");
@@ -1284,7 +1614,7 @@ function guardSees(g, guard, pos, rangeMult = 1) {
   return hasLineOfSight(g.map, guard, pos);
 }
 
-// Figur ist vor dieser Wache versteckt, auÃer die Wache steht im selben Versteck
+// Figur ist vor dieser Wache versteckt, außer die Wache steht im selben Versteck
 function charHiddenFrom(map, guard, c) {
   if (!pointHidden(map, c)) return false;
   for (const poly of map.layers.hide) {
@@ -1323,7 +1653,7 @@ function updateGame(g, dt, notify) {
           tg.path = [];
           tg.engagedChars = [];
           g.knocked++;
-          notify("Volltreffer â Wache am Boden!");
+          notify("Volltreffer – Wache am Boden!");
         } else {
           notify("Der Pfeil prallt wirkungslos ab.");
         }
@@ -1339,15 +1669,35 @@ function updateGame(g, dt, notify) {
   for (let ci = 0; ci < g.chars.length; ci++) {
     const c = g.chars[ci];
     if (c.caught) continue;
+    // Betreten-Trigger: als „beim Betreten“ markierte Interaktionsflächen
+    // lösen aus, sobald eine Figur hineinläuft (unsichtbar, kein Strg+Klick).
+    (c.enterPolys ??= new Set());
+    for (const poly of map.layers.interact ?? []) {
+      const eff = poly.effect;
+      if (!eff || !eff.enter) continue;
+      const inside = pointInPoly(c.x, c.y, poly.pts);
+      const was = c.enterPolys.has(poly);
+      if (inside !== was) {
+        if (inside) {
+          c.enterPolys.add(poly);
+          if (!(g.interacted ??= new Set()).has(poly)) {
+            runInteraction(g, poly, c, notify);
+            if ((poly.effect ?? {}).once !== false) g.interacted.add(poly);
+          }
+        } else {
+          c.enterPolys.delete(poly);
+        }
+      }
+    }
     const bound = c.engaged.length > 0;
     const retreating = g.time < c.disengageUntil;
     let base = (g.sneak ? c.sneakSpeed : c.speed) * WEAPON_TIERS[c.weapon.tier].move;
     if (retreating) base *= COMBAT.disengageSlow;
     if (c.bowMode) base *= BOW.moveMult;
     if (c.bowMode && c.engaged.length > 0 && c.bowStowAt == null) {
-      // Angegriffen: Bogen within 1s wegpacken, bis dahin kampfunfÃ¤hig
+      // Angegriffen: Bogen within 1s wegpacken, bis dahin kampfunfähig
       c.bowStowAt = g.time + 1;
-      notify(`${c.name} wird angegriffen â er muss den Bogen wegpacken!`);
+      notify(`${c.name} wird angegriffen – er muss den Bogen wegpacken!`);
     }
     if (c.bowStowAt != null && g.time >= c.bowStowAt && !c.bowMode) c.bowStowAt = null;
     if (c.bowStowAt != null && g.time >= c.bowStowAt && c.bowMode) {
@@ -1417,7 +1767,7 @@ function updateGame(g, dt, notify) {
     const gold = goalRegion(map);
     if (!g.gold && Math.hypot(c.x - gold.x, c.y - gold.y) < 34) {
       g.gold = true;
-      notify("Gold erbeutet â zurÃ¼ck zum Fluchtpunkt!");
+      notify("Gold erbeutet – zurück zum Fluchtpunkt!");
     }
 
     const esc = startRegion(map);
@@ -1427,12 +1777,52 @@ function updateGame(g, dt, notify) {
     }
   }
 
+  // Portale: aktive Figur nahe einem Portal-Eingang -> Ausgänge zur Auswahl.
+  // Portale sind NICHT Teil der Navigation: Der Spieler läuft zum Eingang,
+  // sieht die möglichen Ausgänge (nummerierte Marker) und wählt mit 1–9.
+  const act = g.chars[g.selected];
+  if (act && !act.caught && g.status === "playing") {
+    const trans = map.markers.transitions ?? [];
+    let entry = null;
+    for (const tr of trans) {
+      if (tr.type === "jump" && !act.canAcro) continue;
+      if (Math.hypot(tr.from.x - act.x, tr.from.y - act.y) < 42) {
+        entry = tr;
+        break;
+      }
+    }
+    const hadPortal = !!g.portal;
+    if (entry) {
+      // Gleicher Name = ein Portal mit mehreren Ausgängen
+      const groupName = entry.name ?? "";
+      const members = groupName
+        ? trans.filter((t2) => (t2.name ?? "") === groupName)
+        : [entry];
+      const options = [];
+      for (const m of members) {
+        if (!options.some((o) => Math.hypot(o.x - m.to.x, o.y - m.to.y) < 2))
+          options.push({ x: m.to.x, y: m.to.y });
+      }
+      g.portal = { name: groupName, kind: entry.type, options };
+      if (!hadPortal)
+        notify(
+          "Portal betreten – Ausgang wählen: " +
+            options.map((_, i) => String(i + 1)).join(", ") +
+            (options.length === 1 ? " (Taste 1)" : ""),
+        );
+    } else if (hadPortal) {
+      g.portal = null;
+    }
+  } else if (g.portal) {
+    g.portal = null;
+  }
+
   const activeChars = g.chars.filter((c) => !c.caught);
 
   for (const guard of g.guards) {
     if (guard.state === "knocked") continue;
 
-    // Verkleidung aktiv: Wachen, die nicht gerade kÃ¤mpfen, verlieren das Ziel
+    // Verkleidung aktiv: Wachen, die nicht gerade kämpfen, verlieren das Ziel
     if (g.stealthUntil && g.time < g.stealthUntil && guard.engagedChars.length === 0 && guard.state !== "patrol") {
       guard.state = "patrol";
       guard.suspTarget = null;
@@ -1440,7 +1830,7 @@ function updateGame(g, dt, notify) {
       guard.path = [];
     }
 
-    // Gebundene Wache: kÃ¤mpft, folgt nur ihrem Gegner
+    // Gebundene Wache: kämpft, folgt nur ihrem Gegner
     if (guard.engagedChars.length > 0) {
       const c0 = g.chars[guard.engagedChars[0]];
       if (!c0 || c0.caught) {
@@ -1461,7 +1851,7 @@ function updateGame(g, dt, notify) {
       }
     }
 
-    // Alarmierte Wache schlieÃt sich einem Kampf in der NÃ¤he an
+    // Alarmierte Wache schließt sich einem Kampf in der Nähe an
     if (guard.state === "alert" && guard.engagedChars.length === 0) {
       for (let ci = 0; ci < g.chars.length; ci++) {
         const c = g.chars[ci];
@@ -1559,7 +1949,7 @@ function updateGame(g, dt, notify) {
         }
       }
     } else if (guard.state === "suspicious") {
-      // KÃ¶der-Wachen: lange, verwirrt-wackelige Suche (leicht ausknockbar).
+      // Köder-Wachen: lange, verwirrt-wackelige Suche (leicht ausknockbar).
       // Leichen-Finder: lange, wache Suche.
       const isNoise = guard.distractKind === "noise";
       const isBody = guard.distractKind === "body";
@@ -1569,7 +1959,7 @@ function updateGame(g, dt, notify) {
       if (!moving) {
         guard.scanTimer += dt;
         if (isNoise) {
-          // Starrt auf den KÃ¶der: dreht sich zur GerÃ¤uschquelle und fixiert sie
+          // Starrt auf den Köder: dreht sich zur Geräuschquelle und fixiert sie
           if (guard.suspTarget) {
             const want = Math.atan2(guard.suspTarget.y - guard.y, guard.suspTarget.x - guard.x);
             let d = want - guard.facing;
@@ -1601,13 +1991,13 @@ function updateGame(g, dt, notify) {
         const ci = g.chars.indexOf(c);
         if (guard.engagedChars.includes(ci)) continue;
         if (Math.hypot(guard.x - c.x, guard.y - c.y) < CATCH_DIST) {
-          // Wache erÃ¶ffnet den Kampf statt die Figur sofort zu fassen
+          // Wache eröffnet den Kampf statt die Figur sofort zu fassen
           if (!c.engaged.includes(guard.id)) c.engaged.push(guard.id);
           guard.engagedChars.push(ci);
           c.koTarget = null;
           c.attackTarget = null;
           c.path = [];
-          notify(`Wache erÃ¶ffnet den Kampf gegen ${c.name}!`);
+          notify(`Wache eröffnet den Kampf gegen ${c.name}!`);
         }
       }
     }
@@ -1618,7 +2008,8 @@ function updateGame(g, dt, notify) {
 
 function drawBackground(ctx, map, img) {
   if (img && img.complete && img.naturalWidth > 0) {
-    ctx.drawImage(img, 0, 0, map.world.w, map.world.h);
+    // Hintergrund 1:1 in voller Auflösung (keine Skalierung auf das Welt-Rechteck)
+    ctx.drawImage(img, 0, 0);
     return;
   }
   // Ersatzkarte aus den Polygonen
@@ -1751,7 +2142,7 @@ function drawGuard(ctx, guard, t) {
     ctx.lineTo(guard.x - 9, guard.y - 17);
     ctx.stroke();
   }
-  // Waffenring: Farbe = Kategorie, StÃ¤rke = Stufe
+  // Waffenring: Farbe = Kategorie, Stärke = Stufe
   if (guard.weapon && WEAPONS[guard.weapon.cat]) {
     ctx.strokeStyle = WEAPONS[guard.weapon.cat].color;
     ctx.lineWidth = guard.weapon.tier === "light" ? 1.5 : guard.weapon.tier === "heavy" ? 4 : 2.5;
@@ -1767,7 +2158,7 @@ function drawGuard(ctx, guard, t) {
       ctx.setLineDash([]);
     }
   }
-  // HP-Balken (nur wenn beschÃ¤digt)
+  // HP-Balken (nur wenn beschädigt)
   const maxHp = guard.maxHp ?? COMBAT.guardHp;
   if (guard.hp !== undefined && guard.hp < maxHp) {
     ctx.fillStyle = "#00000088";
@@ -1783,7 +2174,7 @@ function drawGuard(ctx, guard, t) {
     ctx.arc(guard.x, guard.y - 10, 23, 0, Math.PI * 2);
     ctx.stroke();
   }
-  // Skill-Pips Ã¼ber dem Helm (1=Rookie bis 4=Elite)
+  // Skill-Pips über dem Helm (1=Rookie bis 4=Elite)
   const sk = guard.skill && SKILLS[guard.skill];
   if (sk) {
     for (let i = 0; i < sk.pips; i++) {
@@ -1886,6 +2277,39 @@ function drawChar(ctx, c, selected, t) {
 function drawPlay(ctx, g, t, showWalk) {
   const map = g.map;
 
+  // Portal-Eingänge (violette Ringe; Sprünge orange) und aktive Ausgangswahl
+  for (const tr of map.markers.transitions ?? []) {
+    ctx.beginPath();
+    ctx.arc(tr.from.x, tr.from.y, 9, 0, Math.PI * 2);
+    ctx.fillStyle = tr.type === "jump" ? "rgba(217,119,6,0.5)" : "rgba(139,92,246,0.5)";
+    ctx.fill();
+    ctx.strokeStyle = "#c4b5fd";
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  }
+  if (g.portal) {
+    g.portal.options.forEach((o, i) => {
+      const pulse = 1 + 0.15 * Math.sin(t * 5);
+      ctx.beginPath();
+      ctx.arc(o.x, o.y, 12 * pulse, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(196,181,253,0.35)";
+      ctx.fill();
+      ctx.strokeStyle = "#a78bfa";
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.fillStyle = "#ddd6fe";
+      ctx.font = "bold 12px system-ui, sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(String(i + 1), o.x, o.y);
+    });
+    const c = g.chars[g.selected];
+    ctx.fillStyle = "rgba(221,214,254,0.9)";
+    ctx.font = "bold 12px system-ui, sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("Portal: Ausgang mit 1" + (g.portal.options.length > 1 ? "\u2013" + g.portal.options.length : "") + " wählen", c.x, c.y - 34);
+  }
+
   if (showWalk) {
     const overlayColors = {
       walk: "rgba(134,239,172,0.14)",
@@ -1952,7 +2376,7 @@ function drawPlay(ctx, g, t, showWalk) {
   ctx.fillStyle = g.gold ? "#3f2f18" : "#facc15";
   ctx.fillRect(gold.x - 15, gold.y - 11, 30, 6);
 
-  // ÃbergÃ¤nge (TÃ¼ren + SprÃ¼nge)
+  // Übergänge (Türen + Sprünge)
   for (const tr of map.markers.transitions ?? []) {
     if (tr.type === "door") {
       ctx.strokeStyle = "rgba(167,139,250,0.55)";
@@ -2001,7 +2425,7 @@ function drawPlay(ctx, g, t, showWalk) {
     ctx.stroke();
   }
 
-  // KÃ¶der-GerÃ¤usch
+  // Köder-Geräusch
   if (g.noiseFx) {
     const r = g.noiseFx.t * 400;
     ctx.strokeStyle = `rgba(96,165,250,${Math.max(0, 1 - g.noiseFx.t / 1.2)})`;
@@ -2025,7 +2449,7 @@ function drawPlay(ctx, g, t, showWalk) {
     }
   }
 
-  // KampflÃ¤rm
+  // Kampflärm
   for (const fx of g.combatFx ?? []) {
     const r = fx.t * COMBAT.noiseRadius;
     ctx.strokeStyle = `rgba(239,68,68,${Math.max(0, 1 - fx.t / 1.2)})`;
@@ -2035,7 +2459,7 @@ function drawPlay(ctx, g, t, showWalk) {
     ctx.stroke();
   }
 
-  // Pfeile im Flug: Ausrichtung entlang der Ballistikbahn (inkl. BogenhÃ¶he)
+  // Pfeile im Flug: Ausrichtung entlang der Ballistikbahn (inkl. Bogenhöhe)
   for (const a of g.arrows ?? []) {
     const f = Math.min(1, a.t / a.dur);
     const dx = a.tx - a.sx;
@@ -2061,7 +2485,7 @@ function drawPlay(ctx, g, t, showWalk) {
     ctx.restore();
   }
 
-  // Bogen-Anzeige fÃ¼r Robin: Ladekreis beim Spannen/AbhÃ¤ngen/Wegpacken, Ring wenn bereit
+  // Bogen-Anzeige für Robin: Ladekreis beim Spannen/Abhängen/Wegpacken, Ring wenn bereit
   const robinBow = g.chars.find((cc) => cc.canBow);
   if (
     robinBow &&
@@ -2069,7 +2493,7 @@ function drawPlay(ctx, g, t, showWalk) {
     (robinBow.bowMode || robinBow.bowStowAt != null || g.time < robinBow.bowSwitchAt)
   ) {
     const stowing = robinBow.bowStowAt != null; // erzwungen nach Angriff (1 s)
-    const unbowing = !robinBow.bowMode && g.time < robinBow.bowSwitchAt; // manuelles AbhÃ¤ngen
+    const unbowing = !robinBow.bowMode && g.time < robinBow.bowSwitchAt; // manuelles Abhängen
     const total = stowing ? 1 : BOW.switchTime;
     const remaining = stowing
       ? Math.max(0, robinBow.bowStowAt - g.time)
@@ -2084,7 +2508,7 @@ function drawPlay(ctx, g, t, showWalk) {
         ctx.arc(robinBow.x, robinBow.y - 10, 19, 0, Math.PI * 2);
         ctx.stroke();
       } else {
-        // Ladebalken als Kreis: grÃ¼n beim Spannen, gelb beim AbhÃ¤ngen/Wegpacken
+        // Ladebalken als Kreis: grün beim Spannen, gelb beim Abhängen/Wegpacken
         ctx.strokeStyle = "rgba(0,0,0,0.4)";
         ctx.lineWidth = 4;
         ctx.beginPath();
@@ -2107,6 +2531,8 @@ function drawPlay(ctx, g, t, showWalk) {
 
   // Interaktionsobjekte
   for (const poly of map.layers.interact ?? []) {
+    // Betreten-Trigger sind im Spiel unsichtbar
+    if ((poly.effect ?? {}).enter) continue;
     const used = (g.interacted ?? new Set()).has(poly);
     const c = centroid(poly.pts);
     ctx.strokeStyle = used ? "rgba(120,113,108,0.4)" : "rgba(167,139,250,0.7)";
@@ -2117,7 +2543,7 @@ function drawPlay(ctx, g, t, showWalk) {
       ctx.fillStyle = "rgba(163,230,53,0.08)";
       ctx.fill();
     }
-    // BeschieÃbar-Markierung (Bogen-Ziel)
+    // Beschießbar-Markierung (Bogen-Ziel)
     if ((poly.effect ?? {}).targetable && !used) {
       ctx.strokeStyle = "rgba(163,230,53,0.9)";
       ctx.lineWidth = 2;
@@ -2136,7 +2562,7 @@ function drawPlay(ctx, g, t, showWalk) {
     ctx.stroke();
     ctx.setLineDash([]);
     // Zielpolygone des Effekts: schwach angedeutet, deutlich hervorgehoben,
-    // sobald eine Figur im Interaktions-Polygon steht â nur solange unbenutzt
+    // sobald eine Figur im Interaktions-Polygon steht – nur solange unbenutzt
     const eff = poly.effect;
     if (!used && eff && (eff.targets ?? []).length) {
       const occupied = g.chars.some((ch) => !ch.caught && pointInPoly(ch.x, ch.y, poly.pts));
@@ -2163,7 +2589,7 @@ function drawPlay(ctx, g, t, showWalk) {
         }
         ctx.stroke();
         ctx.setLineDash([]);
-        // Verbindungslinie Objekt â Ziel bei Betreten
+        // Verbindungslinie Objekt → Ziel bei Betreten
         if (occupied) {
           const tc = centroid(tp.pts);
           ctx.strokeStyle = `rgba(196,181,253,${0.35 + pulse * 0.25})`;
@@ -2183,7 +2609,7 @@ function drawPlay(ctx, g, t, showWalk) {
     ctx.fillStyle = used ? "rgba(120,113,108,0.5)" : `rgba(196,181,253,${0.6 + Math.sin(t * 3) * 0.3})`;
     ctx.fillRect(-5, -5, 10, 10);
     ctx.restore();
-    // noise-KÃ¶der: GerÃ¤uschposition + Wirkungsradius nur sichtbar, solange
+    // noise-Köder: Geräuschposition + Wirkungsradius nur sichtbar, solange
     // unbenutzt UND eine Figur im Interaktions-Polygon steht
     if (!used && poly.effect?.type === "noise") {
       const occupied = g.chars.some((ch) => !ch.caught && pointInPoly(ch.x, ch.y, poly.pts));
@@ -2191,7 +2617,7 @@ function drawPlay(ctx, g, t, showWalk) {
         const at = poly.effect.at ?? c;
         const r = poly.effect.radius ?? 400;
         const pulse = 0.5 + Math.sin(t * 4) * 0.3;
-        // Radius-Kreis um die GerÃ¤uschposition
+        // Radius-Kreis um die Geräuschposition
         ctx.strokeStyle = `rgba(96,165,250,${0.65 + pulse * 0.35})`;
         ctx.lineWidth = 3;
         ctx.beginPath();
@@ -2199,7 +2625,7 @@ function drawPlay(ctx, g, t, showWalk) {
         ctx.stroke();
         ctx.fillStyle = "rgba(96,165,250,0.08)";
         ctx.fill();
-        // Verbindungslinie Objekt â GerÃ¤uschposition (nur bei externer Position)
+        // Verbindungslinie Objekt → Geräuschposition (nur bei externer Position)
         if (poly.effect.at) {
           ctx.strokeStyle = "rgba(96,165,250,0.6)";
           ctx.lineWidth = 2;
@@ -2210,7 +2636,7 @@ function drawPlay(ctx, g, t, showWalk) {
           ctx.stroke();
           ctx.setLineDash([]);
         }
-        // Marker an der GerÃ¤uschposition
+        // Marker an der Geräuschposition
         ctx.fillStyle = "rgba(96,165,250,0.95)";
         ctx.beginPath();
         ctx.arc(at.x, at.y, 7, 0, Math.PI * 2);
@@ -2218,7 +2644,7 @@ function drawPlay(ctx, g, t, showWalk) {
         ctx.fillStyle = "#0c120a";
         ctx.font = "bold 11px Georgia, serif";
         ctx.textAlign = "center";
-        ctx.fillText("âª", at.x, at.y + 4);
+        ctx.fillText("♪", at.x, at.y + 4);
       }
     }
   }
@@ -2259,7 +2685,7 @@ function drawPlay(ctx, g, t, showWalk) {
 }
 
 const LAYER_STYLE = {
-  walk: { fill: "rgba(134,239,172,0.15)", stroke: "#86efac", label: "LaufflÃ¤che" },
+  walk: { fill: "rgba(134,239,172,0.15)", stroke: "#86efac", label: "Lauffläche" },
   climb: { fill: "rgba(96,165,250,0.18)", stroke: "#60a5fa", label: "Klettern" },
   acro: { fill: "rgba(244,114,182,0.18)", stroke: "#f472b6", label: "Akrobatik" },
   hide: { fill: "rgba(52,211,153,0.2)", stroke: "#34d399", label: "Versteck" },
@@ -2268,9 +2694,26 @@ const LAYER_STYLE = {
   start: { fill: "rgba(74,222,128,0.25)", stroke: "#4ade80", label: "Start/Flucht" },
   goal: { fill: "rgba(250,204,21,0.25)", stroke: "#facc15", label: "Ziel (Gold)" },
   interact: { fill: "rgba(167,139,250,0.15)", stroke: "#a78bfa", label: "Interaktion" },
-  paths: { fill: "rgba(0,0,0,0)", stroke: "#fb7185", label: "Wachenpfade & ÃbergÃ¤nge" },
-  fx: { fill: "rgba(45,212,191,0.08)", stroke: "#2dd4bf", label: "Effekt-FlÃ¤che (ohne Spielfunktion)" },
+  paths: { fill: "rgba(0,0,0,0)", stroke: "#fb7185", label: "Wachenpfade & Übergänge" },
+  fx: { fill: "rgba(45,212,191,0.08)", stroke: "#2dd4bf", label: "Effekt-Fläche (ohne Spielfunktion)" },
 };
+
+// Zusammengefasste Editor-Ebenen: Start/Flucht + Ziel und Hindernis +
+// Sichtblocker teilen sich je eine Auswahl im Ebenen-Panel. Neue Polygone
+// landen über den Unter-Buttons in der jeweiligen Einzel-Ebene.
+const EDIT_GROUPS = [
+  { layers: ["walk"] },
+  { layers: ["climb"] },
+  { layers: ["acro"] },
+  { layers: ["hide"] },
+  { layers: ["blocking", "block"], label: "Hindernis & Sichtblocker", sub: true },
+  { layers: ["interact"] },
+  { layers: ["paths"] },
+  { layers: ["fx"] },
+  { layers: ["start", "goal"], label: "Start/Flucht & Ziel", sub: true },
+];
+const editLayersOf = (ln) =>
+  (EDIT_GROUPS.find((g) => g.layers.includes(ln)) ?? { layers: [ln] }).layers;
 
 function drawEdit(ctx, map, edit, hover) {
   const inPaths = edit.layer === "paths";
@@ -2313,8 +2756,8 @@ function drawEdit(ctx, map, edit, hover) {
         }
         continue;
       }
-      // KÃ¶der-Position von noise-Interaktionen (blauer Marker + Ziellinie)
-      // nur wenn das Polygon in der interact-Ebene ausgewÃ¤hlt ist
+      // Köder-Position von noise-Interaktionen (blauer Marker + Ziellinie)
+      // nur wenn das Polygon in der interact-Ebene ausgewählt ist
       if (
         layerName === "interact" &&
         edit.selected?.layer === "interact" &&
@@ -2345,7 +2788,7 @@ function drawEdit(ctx, map, edit, hover) {
         ctx.fillStyle = "#0c120a";
         ctx.font = "bold 12px Georgia, serif";
         ctx.textAlign = "center";
-        ctx.fillText("âª", at.x, at.y + 4);
+        ctx.fillText("♪", at.x, at.y + 4);
       }
       fillPolyPath(ctx, pts);
       ctx.fillStyle = style.fill;
@@ -2449,7 +2892,7 @@ function drawEdit(ctx, map, edit, hover) {
     }
   });
 
-  // ÃbergÃ¤nge (nur in der paths-Ebene editierbar)
+  // Übergänge (nur in der paths-Ebene editierbar)
   if (inPaths)
   (map.markers.transitions ?? []).forEach((tr, ti) => {
     const isSel = edit.selectedTrans === ti;
@@ -2478,7 +2921,7 @@ function drawEdit(ctx, map, edit, hover) {
     ctx.font = "bold 12px Georgia, serif";
     ctx.textAlign = "center";
     ctx.fillText(
-      tr.type === "door" ? tr.name || "TÃR" : "SPRUNG",
+      tr.type === "door" ? tr.name || "TÜR" : "SPRUNG",
       (tr.from.x + tr.to.x) / 2,
       (tr.from.y + tr.to.y) / 2 - 14,
     );
@@ -2486,6 +2929,92 @@ function drawEdit(ctx, map, edit, hover) {
 }
 
 // ---------- Hauptkomponente ----------
+
+// Importiertes / geladenes Karten-JSON normalisieren (Ebenen, Wachen, Übergänge).
+// Wird vom JSON-Import und vom Laden von Karten aus Spielsammlungen genutzt.
+function normalizeImportedMap(parsed) {
+  if (!parsed.layers || !parsed.layers.walk || !parsed.markers) throw new Error("Struktur unvollständig");
+  const normPoly = (p) =>
+    Array.isArray(p)
+      ? { name: "", pts: p }
+      : { name: p.name ?? "", pts: p.pts ?? p.points ?? [] };
+  const rawWalk = parsed.layers.walk ?? [];
+  const walkOut = [];
+  const climbOut = [...(parsed.layers.climb ?? []).map(normPoly)];
+  const acroOut = [...(parsed.layers.acro ?? []).map(normPoly)];
+  for (const raw of rawWalk) {
+    const flags = Array.isArray(raw) ? [] : raw.flags ?? [];
+    const poly = normPoly(raw);
+    if (flags.includes("climb")) climbOut.push(poly);
+    else if (flags.includes("acro")) acroOut.push(poly);
+    else walkOut.push(poly);
+  }
+  const layerOut = {
+    walk: walkOut,
+    climb: climbOut,
+    acro: acroOut,
+    hide: (parsed.layers.hide ?? []).map(normPoly),
+    blocking: (parsed.layers.blocking ?? []).map(normPoly),
+    block: (parsed.layers.block ?? []).map(normPoly),
+    start: (parsed.layers.start ?? []).map(normPoly),
+    goal: (parsed.layers.goal ?? []).map(normPoly),
+    interact: [...(parsed.layers.interact ?? []).map((p) => {
+      const poly = normPoly(p);
+      const e = p && !Array.isArray(p) && p.effect ? p.effect : null;
+      return e ? { ...poly, effect: e } : poly;
+    }),
+    ],
+    paths: (parsed.layers.paths ?? []).map(normPoly),
+    fx: (parsed.layers.fx ?? []).map(normPoly),
+  };
+  return ensureLayers({
+    ...parsed,
+    layers: layerOut,
+    markers: {
+      ...parsed.markers,
+      guards: (parsed.markers.guards ?? []).map((gd) => ({
+        ...gd,
+        weapon: normWeapon(gd.weapon) ?? randWeapon(),
+        skill: normSkill(gd.skill) ?? randSkill(),
+        attentive: typeof gd.attentive === "boolean" ? gd.attentive : Math.random() < 0.5,
+      })),
+      transitions: parsed.markers.transitions ?? [],
+    },
+  });
+}
+
+// Fortschritt einer Partie für Sitzungs-Wiederherstellung (Reload) kompakt
+// aufzeichnen und auf eine neue Partie übertragen.
+function captureProgress(g) {
+  return {
+    chars: g.chars.map((c) => ({
+      id: c.id,
+      weapon: c.weapon,
+      stamina: c.stamina,
+      maxStamina: c.maxStamina,
+      caught: c.caught,
+      arrows: c.arrows,
+      bowMode: c.bowMode,
+    })),
+    knocked: g.knocked,
+    items: g.items ?? [],
+  };
+}
+
+function applyProgress(g, snap) {
+  for (const nc of g.chars) {
+    const oc = (snap.chars ?? []).find((x) => x.id === nc.id);
+    if (!oc) continue;
+    nc.weapon = oc.weapon;
+    nc.stamina = oc.stamina;
+    nc.maxStamina = oc.maxStamina;
+    nc.caught = oc.caught;
+    nc.arrows = oc.arrows;
+    nc.bowMode = oc.bowMode;
+  }
+  g.knocked = snap.knocked ?? g.knocked;
+  g.items = snap.items ?? [];
+}
 
 export default function App() {
   const canvasRef = useRef(null);
@@ -2506,6 +3035,28 @@ export default function App() {
 
   const [mode, setMode] = useState("play");
   const [layer, setLayer] = useState("walk");
+  const [newTarget, setNewTarget] = useState("start");
+  const [worldW, setWorldW] = useState(worldDims.current.w);
+  const [worldH, setWorldH] = useState(worldDims.current.h);
+  const [navInfo, setNavInfo] = useState(null);
+  const [collection, setCollection] = useState(null); // verfügbare Spiele (lokal + Repo)
+  const [activeGame, setActiveGame] = useState(null); // laufendes Spiel
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [repoUrl, setRepoUrl] = useState("");
+  const [loadingMaps, setLoadingMaps] = useState(false);
+  const [wonMaps, setWonMaps] = useState(() => {
+    try {
+      return new Set(JSON.parse(sessionStorage.getItem("sherwood.won") ?? "[]"));
+    } catch {
+      return new Set();
+    }
+  });
+  const mapIdRef = useRef("builtin");
+  const activeGameRef = useRef(null);
+  const mapCacheRef = useRef(new Map()); // "gameId/mapId" -> { id, name, data, img, image }
+  const [reduceTol, setReduceTol] = useState(2.5);
+  const [reduceInfo, setReduceInfo] = useState(null);
+  const undoRef = useRef(null);
   useEffect(() => {
     editRef.current.layer = layer;
   }, [layer]);
@@ -2582,6 +3133,8 @@ export default function App() {
           if (Math.abs(img.naturalWidth - mapRef.current.world.w) > 2 || Math.abs(img.naturalHeight - mapRef.current.world.h) > 2) {
             mapRef.current = scaleMap(mapRef.current, img.naturalWidth, img.naturalHeight);
             worldDims.current = { w: img.naturalWidth, h: img.naturalHeight };
+            setWorldW(img.naturalWidth);
+            setWorldH(img.naturalHeight);
             if (gameRef.current.status === "playing" && gameRef.current.time < 3) {
               gameRef.current = newGame(mapRef.current);
             }
@@ -2617,6 +3170,350 @@ export default function App() {
     pushMessage("Neuer Versuch!");
   }, [pushMessage]);
 
+  // ---------- Spielsammlungen (lokal + Git-Repo) ----------
+  // Ein Spiel = Ordner mit maps/…: index.json listet Spiele, jedes Spiel listet
+  // seine Karten (JSON + Hintergrundbild). Lokal: /games/<id>/…, im Repo:
+  // raw.githubusercontent.com/<owner>/<repo>/<ref>/games/<id>/…
+
+  const rawBaseFromUrl = (url) => {
+    const m = /^https?:\/\/github\.com\/([^/\s]+)\/([^/\s]+)(?:\/tree\/([^/\s]+))?/.exec(url);
+    if (m) return `https://raw.githubusercontent.com/${m[1]}/${m[2]}/${m[3] ?? "main"}/`;
+    const m2 = /^https?:\/\/raw\.githubusercontent\.com\/(.+?)\/?$/.exec(url);
+    if (m2) return `https://raw.githubusercontent.com/${m2[1].replace(/\/$/, "")}/`;
+    return url.endsWith("/") ? url : url + "/";
+  };
+
+  const loadCollection = useCallback(async (extraRepoUrl) => {
+    const games = [
+      {
+        id: "builtin",
+        name: "Sherwood (eingebaut)",
+        source: "builtin",
+        base: null,
+        maps: [{ id: "builtin", name: "Standardkarte", image: null, json: null }],
+      },
+    ];
+    const readIndex = async (base, source) => {
+      try {
+        const r = await fetch(base + "index.json");
+        if (!r.ok) return;
+        const idx = await r.json();
+        for (const gm of idx.games ?? []) {
+          if (!gm || !gm.id || !Array.isArray(gm.maps)) continue;
+          games.push({
+            id: gm.id,
+            name: gm.name ?? gm.id,
+            source,
+            base: base + gm.id + "/",
+            maps: gm.maps.filter((m) => m && m.id),
+          });
+        }
+      } catch {
+        /* Quelle nicht verfügbar – überspringen */
+      }
+    };
+    await readIndex("/games/", "local");
+    if (extraRepoUrl) await readIndex(rawBaseFromUrl(extraRepoUrl) + "games/", "repo");
+    setCollection({ games });
+    return games;
+  }, []);
+
+  useEffect(() => {
+    // Wenn eine Sitzung mit Nicht-Builtin-Spiel gespeichert ist, übernimmt der
+    // Restore-Effect den Ladevorgang (inkl. Repo-URL) – hier nicht doppeln.
+    const saved = (() => {
+      try {
+        return JSON.parse(sessionStorage.getItem("sherwood.session") ?? "null");
+      } catch {
+        return null;
+      }
+    })();
+    if (saved && saved.game && saved.game.source !== "builtin") return;
+    loadCollection();
+  }, [loadCollection]);
+
+  const loadMapData = useCallback(async (game, m) => {
+    const key = game.id + "/" + m.id;
+    if (mapCacheRef.current.has(key)) return mapCacheRef.current.get(key);
+    const ent = { id: m.id, name: m.name ?? m.id, data: null, img: null, image: m.image ? (game.base ?? "") + m.image : null };
+    mapCacheRef.current.set(key, ent);
+    try {
+      if (game.source === "builtin" || !m.json) {
+        ent.data = ensureLayers(defaultMap(worldDims.current.w, worldDims.current.h));
+      } else {
+        const r = await fetch((game.base ?? "") + m.json);
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        ent.data = normalizeImportedMap(await r.json());
+      }
+    } catch {
+      ent.data = ensureLayers(defaultMap(worldDims.current.w, worldDims.current.h));
+    }
+    return ent;
+  }, []);
+
+  const ensureMapImage = useCallback((ent, mapId) => {
+    if (!ent || ent.img || !ent.image) return;
+    const img = new Image();
+    img.onload = () => {
+      ent.img = img;
+      if (mapIdRef.current === mapId) {
+        imgRef.current = img;
+        setImgOk(true);
+      }
+    };
+    img.src = ent.image;
+  }, []);
+
+  // Bild + Kartengröße einer Karte in die Ansicht übernehmen
+  const applyMapToView = useCallback((ent) => {
+    imgRef.current = ent.img ?? null;
+    setImgOk(!!ent.img);
+    ensureMapImage(ent, ent.id);
+    worldDims.current = { w: ent.data.world.w, h: ent.data.world.h };
+    setWorldW(ent.data.world.w);
+    setWorldH(ent.data.world.h);
+    imgScaledRef.current = true;
+  }, [ensureMapImage]);
+
+  // ---------- Reload-Robustheit (sessionStorage) ----------
+
+  const saveSession = useCallback(() => {
+    try {
+      const game = activeGameRef.current;
+      const g = gameRef.current;
+      sessionStorage.setItem(
+        "sherwood.session",
+        JSON.stringify({
+          repoUrl,
+          game:
+            game && game.source !== "builtin"
+              ? { id: game.id, name: game.name, source: game.source, base: game.base, maps: game.maps }
+              : null,
+          mapId: (g && g.mapId) || mapIdRef.current,
+          progress: g ? captureProgress(g) : null,
+        }),
+      );
+    } catch {
+      /* Speicher voll / privater Modus: nicht weiter tragisch */
+    }
+  }, [repoUrl]);
+
+  const markWon = useCallback((id) => {
+    if (!id) return;
+    setWonMaps((prev) => {
+      if (prev.has(id)) return prev;
+      const s = new Set(prev);
+      s.add(id);
+      try {
+        sessionStorage.setItem("sherwood.won", JSON.stringify([...s]));
+      } catch {
+        /* ignorieren */
+      }
+      return s;
+    });
+  }, []);
+
+  // Sitzung nach Reload wiederherstellen: Spiel, aktuelle Karte, Fortschritt
+  useEffect(() => {
+    let cancelled = false;
+    const saved = (() => {
+      try {
+        return JSON.parse(sessionStorage.getItem("sherwood.session") ?? "null");
+      } catch {
+        return null;
+      }
+    })();
+    if (!saved || !saved.game || saved.game.source === "builtin") return;
+    (async () => {
+      const games = await loadCollection(saved.repoUrl ?? "");
+      if (cancelled) return;
+      const gm = games.find((x) => x.id === saved.game.id && x.source === saved.game.source);
+      if (!gm || gm.source === "builtin" || !gm.maps.length) return;
+      const entries = await Promise.all(gm.maps.map((m) => loadMapData(gm, m)));
+      if (cancelled) return;
+      const idx = Math.max(0, gm.maps.findIndex((m) => m.id === saved.mapId));
+      const m = gm.maps[idx];
+      const ent = entries[idx];
+      activeGameRef.current = gm;
+      setActiveGame(gm);
+      if (saved.repoUrl) setRepoUrl(saved.repoUrl);
+      mapIdRef.current = m.id;
+      mapRef.current = ent.data;
+      applyMapToView(ent);
+      const g = newGame(ent.data);
+      g.mapId = m.id;
+      g.mapPool = {};
+      gm.maps.forEach((mm, i) => {
+        g.mapPool[mm.id] = { id: mm.id, map: entries[i].data, name: mm.name };
+      });
+      if (saved.progress) applyProgress(g, saved.progress);
+      gameRef.current = g;
+      pushMessage("Sitzung wiederhergestellt: " + gm.name + " · Karte: " + (m.name ?? m.id));
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadCollection, loadMapData, applyMapToView, pushMessage]);
+
+  const startGameMap = useCallback(
+    async (game, mapIndex, toEditor) => {
+      setLoadingMaps(true);
+      const entries = await Promise.all(game.maps.map((m) => loadMapData(game, m)));
+      setLoadingMaps(false);
+      const game2 = { ...game, maps: game.maps.map((m, i) => ({ ...m, name: m.name ?? entries[i].name })) };
+      activeGameRef.current = game2;
+      setActiveGame(game2);
+      setMenuOpen(false);
+      const m = game2.maps[mapIndex] ?? game2.maps[0];
+      const ent = entries[mapIndex] ?? entries[0];
+      mapIdRef.current = m.id;
+      mapRef.current = ent.data;
+      applyMapToView(ent);
+      const g = newGame(ent.data);
+      g.mapId = m.id;
+      g.mapPool = {};
+      game2.maps.forEach((mm, i) => {
+        g.mapPool[mm.id] = { id: mm.id, map: entries[i].data, name: mm.name };
+      });
+      gameRef.current = g;
+      editRef.current = { drawing: null, selected: null, selectedGuard: null, selectedTrans: null };
+      syncEditInfo();
+      modeRef.current = toEditor ? "edit" : "play";
+      setMode(toEditor ? "edit" : "play");
+      camRef.current = { x: 0, y: 0, z: 1, follow: true };
+      pushMessage("Spiel gestartet: " + game2.name + " · Karte: " + m.name);
+      saveSession();
+    },
+    [loadMapData, applyMapToView, syncEditInfo, pushMessage, saveSession],
+  );
+
+  // Karte im Editor anzeigen/bearbeiten (Kartenwechsel ohne Spielneustart)
+  const editMap = useCallback(
+    async (m) => {
+      const game = activeGameRef.current;
+      if (!game) return;
+      const ent = await loadMapData(game, m);
+      mapIdRef.current = m.id;
+      mapRef.current = ent.data;
+      applyMapToView(ent);
+      gameRef.current = newGame(ent.data);
+      gameRef.current.mapId = m.id;
+      gameRef.current.mapPool = gameRef.current.mapPool ?? {};
+      for (const mm of game.maps) {
+        const e2 = mapCacheRef.current.get(game.id + "/" + mm.id);
+        if (e2) gameRef.current.mapPool[mm.id] = { id: mm.id, map: e2.data, name: mm.name };
+      }
+      editRef.current = { drawing: null, selected: null, selectedGuard: null, selectedTrans: null };
+      syncEditInfo();
+      modeRef.current = "edit";
+      setMode("edit");
+      pushMessage("Karte im Editor: " + (m.name ?? m.id));
+      saveSession();
+    },
+    [loadMapData, applyMapToView, syncEditInfo, pushMessage, saveSession],
+  );
+
+  // Leere Karte zum aktiven Spiel hinzufügen (nur im Speicher, via JSON exportierbar)
+  const addNewMap = useCallback(() => {
+    const game = activeGameRef.current;
+    if (!game) return;
+    const id = "neu-" + Date.now().toString(36);
+    const w = Math.max(400, Math.min(20000, Math.round(Number(worldW) || 2400)));
+    const h = Math.max(400, Math.min(20000, Math.round(Number(worldH) || 1600)));
+    const rect = (x, y, ww, hh) => ({ name: "", pts: [{ x, y }, { x: x + ww, y }, { x: x + ww, y: y + hh }, { x, y: y + hh }] });
+    const data = ensureLayers({
+      world: { w, h },
+      layers: Object.fromEntries(LAYER_NAMES.map((ln) => [ln, []])),
+      markers: { guards: [], transitions: [] },
+    });
+    data.layers.start.push(rect(40, 40, 120, 120));
+    data.layers.goal.push(rect(w - 200, h - 200, 160, 160));
+    const m = { id, name: "Neue Karte", image: null, json: null };
+    mapCacheRef.current.set(game.id + "/" + id, { id, name: m.name, data, img: null, image: null });
+    const game2 = { ...game, maps: [...game.maps, m] };
+    activeGameRef.current = game2;
+    setActiveGame(game2);
+    const g = gameRef.current;
+    if (g) g.mapPool = { ...(g.mapPool ?? {}), [id]: { id, map: data, name: m.name } };
+    pushMessage("Neue Karte angelegt (nur im Speicher – per JSON exportieren).");
+  }, [worldW, worldH, pushMessage]);
+
+  // Nach gewonnenem Spiel: nächste Karte der Sammlung
+  const goNextMap = useCallback(() => {
+    const g = gameRef.current;
+    const game = activeGameRef.current;
+    if (!g || !game) return;
+    const cur = game.maps.findIndex((m) => m.id === (g.mapId ?? mapIdRef.current));
+    if (cur < 0 || cur + 1 >= game.maps.length) {
+      pushMessage("Letzte Karte – Sammlung durchgespielt!");
+      return;
+    }
+    const next = game.maps[cur + 1];
+    const ent = mapCacheRef.current.get(game.id + "/" + next.id);
+    if (!ent) return;
+    g.pendingMap = next.id;
+    applyMapChange(g);
+  }, [pushMessage]);
+
+  const hasNextMap = useCallback(() => {
+    const game = activeGameRef.current;
+    const g = gameRef.current;
+    if (!game || !g) return false;
+    const cur = game.maps.findIndex((m) => m.id === (g.mapId ?? mapIdRef.current));
+    return cur >= 0 && cur + 1 < game.maps.length;
+  }, []);
+
+  // ---------- Spiel-Export (Downloads: JSON + PNG + index.json) ----------
+
+  const downloadFile = (name, dataUrl) => {
+    const a = document.createElement("a");
+    a.href = dataUrl;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  };
+
+  const exportGame = useCallback(() => {
+    const game = activeGameRef.current;
+    if (!game) return;
+    const mapsOut = [];
+    let nImg = 0;
+    for (const m of game.maps) {
+      const ent = mapCacheRef.current.get(game.id + "/" + m.id);
+      if (!ent) continue;
+      const safeId = String(m.id).replace(/[^a-zA-Z0-9_-]/g, "_");
+      downloadFile(
+        safeId + ".json",
+        "data:application/json;charset=utf-8," + encodeURIComponent(JSON.stringify(ent.data)),
+      );
+      const entry = { id: m.id, name: m.name ?? m.id, json: safeId + ".json" };
+      if (ent.img && ent.img.naturalWidth > 0) {
+        const cv = document.createElement("canvas");
+        cv.width = ent.img.naturalWidth;
+        cv.height = ent.img.naturalHeight;
+        const cx = cv.getContext("2d");
+        if (cx) {
+          cx.drawImage(ent.img, 0, 0);
+          downloadFile(safeId + ".png", cv.toDataURL("image/png"));
+          entry.image = safeId + ".png";
+          nImg++;
+        }
+      }
+      mapsOut.push(entry);
+    }
+    const idx = { games: [{ id: game.id, name: game.name, maps: mapsOut }] };
+    downloadFile(
+      "index.json",
+      "data:application/json;charset=utf-8," + encodeURIComponent(JSON.stringify(idx, null, 2)),
+    );
+    pushMessage(
+      "Spiel exportiert: " + mapsOut.length + " Karten-JSONs, " + nImg + " PNG-Bilder, index.json. " +
+        "Dateien in games/" + game.id + "/ ablegen.",
+    );
+  }, [pushMessage]);
+
   const toggleSneak = useCallback(() => {
     gameRef.current.sneak = !gameRef.current.sneak;
   }, []);
@@ -2631,7 +3528,7 @@ export default function App() {
     const c = g.chars[g.selected];
     if (!c || c.caught) return;
     if (!c.canBow) {
-      pushMessage("Nur Robin fÃ¼hrt einen Bogen.");
+      pushMessage("Nur Robin führt einen Bogen.");
       return;
     }
     if (g.time < c.bowSwitchAt) return;
@@ -2639,7 +3536,7 @@ export default function App() {
     c.bowStowAt = null;
     c.bowSwitchAt = g.time + BOW.switchTime;
     c.path = [];
-    pushMessage(c.bowMode ? "Robin spannt den Bogen â¦" : "Robin hÃ¤ngt den Bogen ab â¦");
+    pushMessage(c.bowMode ? "Robin spannt den Bogen …" : "Robin hängt den Bogen ab …");
     setUi((p) => ({ ...p, bow: c.bowMode ? "switch" : "stow", arrows: c.arrows ?? 0 }));
   }, [pushMessage]);
 
@@ -2691,11 +3588,13 @@ export default function App() {
   const finishPolygon = useCallback(() => {
     const e = editRef.current;
     if (e.drawing && e.drawing.length >= 3) {
-      mapRef.current.layers[layer].push({ name: "", pts: e.drawing });
+      // Zusammengefasste Gruppe: Ziel-Ebene über Unter-Auswahl bestimmen
+      const target = editLayersOf(layer).length > 1 ? newTarget : layer;
+      mapRef.current.layers[target].push({ name: "", pts: e.drawing });
     }
     e.drawing = null;
     syncEditInfo();
-  }, [layer, syncEditInfo]);
+  }, [layer, newTarget, syncEditInfo]);
 
   const deleteSelected = useCallback(() => {
     const e = editRef.current;
@@ -2759,7 +3658,7 @@ export default function App() {
   }, []);
 
   // Wache einem benannten Pfad aus der paths-Ebene zuweisen
-  // noise-Effekt: nÃ¤chste Karte-Klicks setzen die GerÃ¤uschposition
+  // noise-Effekt: nächste Karte-Klicks setzen die Geräuschposition
   const pickNoisePos = useCallback(() => {
     editRef.current.pickNoiseFor = editRef.current.selected;
     syncEditInfo();
@@ -2823,6 +3722,17 @@ export default function App() {
     img.onload = () => {
       imgRef.current = img;
       setImgOk(true);
+      // Karte auf die volle Bildgröße bringen (kein Stauchen auf das alte Welt-Rechteck)
+      imgScaledRef.current = true;
+      if (Math.abs(img.naturalWidth - mapRef.current.world.w) > 2 || Math.abs(img.naturalHeight - mapRef.current.world.h) > 2) {
+        mapRef.current = scaleMap(mapRef.current, img.naturalWidth, img.naturalHeight);
+        worldDims.current = { w: img.naturalWidth, h: img.naturalHeight };
+        setWorldW(img.naturalWidth);
+        setWorldH(img.naturalHeight);
+        if (gameRef.current.status === "playing" && gameRef.current.time < 3) {
+          gameRef.current = newGame(mapRef.current);
+        }
+      }
     };
     img.src = url;
     e.target.value = "";
@@ -2833,64 +3743,83 @@ export default function App() {
     setImgOk(false);
   }, []);
 
+  const clearPolygons = useCallback(() => {
+    const m = mapRef.current;
+    for (const ln of LAYER_NAMES) m.layers[ln] = [];
+    editRef.current = { ...editRef.current, drawing: null, selected: null };
+    syncEditInfo();
+    pushMessage("Alle Polygone entfernt (Wachen, Pfade und Karte bleiben).");
+  }, [syncEditInfo, pushMessage]);
+
+  const applyWorldSize = useCallback(() => {
+    const w = Math.max(400, Math.min(20000, Math.round(Number(worldW) || 0)));
+    const h = Math.max(400, Math.min(20000, Math.round(Number(worldH) || 0)));
+    if (w !== mapRef.current.world.w || h !== mapRef.current.world.h) {
+      mapRef.current = scaleMap(mapRef.current, w, h);
+      worldDims.current = { w, h };
+      if (gameRef.current.status === "playing") gameRef.current = newGame(mapRef.current);
+    }
+    setWorldW(w);
+    setWorldH(h);
+  }, [worldW, worldH]);
+
+  const reducePoints = useCallback(() => {
+    const map = mapRef.current;
+    let before = 0;
+    let after = 0;
+    undoRef.current = JSON.stringify(map.layers);
+    for (const ln of LAYER_NAMES) {
+      for (const poly of map.layers[ln] ?? []) {
+        before += poly.pts.length;
+        poly.pts = simplifyPolyDP(poly.pts, reduceTol);
+        after += poly.pts.length;
+      }
+    }
+    setReduceInfo({ before, after, tol: reduceTol });
+    syncEditInfo();
+    pushMessage("Punkte reduziert: " + before + " → " + after + " (Toleranz " + reduceTol + " px).");
+  }, [reduceTol, syncEditInfo, pushMessage]);
+
+  const undoReduce = useCallback(() => {
+    if (!undoRef.current) return;
+    mapRef.current.layers = JSON.parse(undoRef.current);
+    undoRef.current = null;
+    setReduceInfo(null);
+    syncEditInfo();
+    pushMessage("Reduktion rückgängig – Original-Polygone wiederhergestellt.");
+  }, [syncEditInfo, pushMessage]);
+
+  const bakeNavMesh = useCallback(() => {
+    const map = mapRef.current;
+    const t0 = performance.now();
+    const rev = navRev(map);
+    const navs = {};
+    const counts = {};
+    for (const key of NAV_KEYS) {
+      const nav = buildNavFor(map, key);
+      navs[key] = nav;
+      counts[key] = nav.nodes.length;
+    }
+    map.navMesh = { rev, navs };
+    setNavInfo({ rev, counts, ms: Math.round(performance.now() - t0) });
+    pushMessage(
+      "Navmesh gebacken (Wache/Boden/Kletterer/Akrobat): " +
+        NAV_KEYS.map((k) => counts[k] + " Knoten").join(" / ") +
+        " in " + Math.round(performance.now() - t0) + " ms. Export enthält ihn automatisch.",
+    );
+  }, [pushMessage]);
+
   const exportJson = useCallback(() => {
     setJsonText(JSON.stringify(mapRef.current));
   }, []);
 
   const importJson = useCallback(() => {
     try {
-      const parsed = JSON.parse(jsonText);
-      if (!parsed.layers || !parsed.layers.walk || !parsed.markers) throw new Error("Struktur unvollstÃ¤ndig");
-      const normPoly = (p) =>
-        Array.isArray(p)
-          ? { name: "", pts: p }
-          : { name: p.name ?? "", pts: p.pts ?? p.points ?? [] };
-      // AbwÃ¤rtskompatibilitÃ¤t: alte walk-Polygone mit flags ["climb"/"acro"] in eigene Ebenen verschieben
-      const rawWalk = parsed.layers.walk ?? [];
-      const walkOut = [];
-      const climbOut = [...(parsed.layers.climb ?? []).map(normPoly)];
-      const acroOut = [...(parsed.layers.acro ?? []).map(normPoly)];
-      for (const raw of rawWalk) {
-        const flags = Array.isArray(raw) ? [] : raw.flags ?? [];
-        const poly = normPoly(raw);
-        if (flags.includes("climb")) climbOut.push(poly);
-        else if (flags.includes("acro")) acroOut.push(poly);
-        else walkOut.push(poly);
-      }
-      const layerOut = {
-        walk: walkOut,
-        climb: climbOut,
-        acro: acroOut,
-        hide: (parsed.layers.hide ?? []).map(normPoly),
-        blocking: (parsed.layers.blocking ?? []).map(normPoly),
-        block: (parsed.layers.block ?? []).map(normPoly),
-        start: (parsed.layers.start ?? []).map(normPoly),
-        goal: (parsed.layers.goal ?? []).map(normPoly),
-        interact: [...(parsed.layers.interact ?? []).map((p) => {
-          const poly = normPoly(p);
-          const e = p && !Array.isArray(p) && p.effect ? p.effect : null;
-          return e ? { ...poly, effect: e } : poly;
-        }),
-        ],
-        paths: (parsed.layers.paths ?? []).map(normPoly),
-        fx: (parsed.layers.fx ?? []).map(normPoly),
-      };
-      mapRef.current = ensureLayers({
-        ...parsed,
-        layers: layerOut,
-        markers: {
-          ...parsed.markers,
-          guards: (parsed.markers.guards ?? []).map((gd) => ({
-            ...gd,
-            weapon: normWeapon(gd.weapon) ?? randWeapon(),
-            skill: normSkill(gd.skill) ?? randSkill(),
-            attentive: typeof gd.attentive === "boolean" ? gd.attentive : Math.random() < 0.5,
-          })),
-          transitions: parsed.markers.transitions ?? [],
-        },
-      });
-      worldDims.current = parsed.world ?? worldDims.current;
-      // Optionale Karten-Sammlung fÃ¼r map-Interaktionen (Karte wechseln)
+      mapRef.current = normalizeImportedMap(JSON.parse(jsonText));
+      worldDims.current = mapRef.current.world ?? worldDims.current;
+      setWorldW(worldDims.current.w);
+      setWorldH(worldDims.current.h);
+      // Optionale Karten-Sammlung für map-Interaktionen (Karte wechseln)
       if (parsed.mapPool && typeof parsed.mapPool === "object") {
         if (gameRef.current) gameRef.current.mapPool = parsed.mapPool;
       }
@@ -2919,12 +3848,12 @@ export default function App() {
         if (k === "Enter") finishPolygon();
         // N = neues Polygon beginnen
         if (k === "n" || k === "N") startPolygon();
-        // 1-9, 0, Minus = Ebene wÃ¤hlen (Reihenfolge wie im Ebenen-Panel)
+        // 1-9, 0, Minus = Ebene wählen (Reihenfolge wie im Ebenen-Panel)
         const digitIdx = "1234567890-".indexOf(k);
         if (digitIdx >= 0 && digitIdx < LAYER_NAMES.length) {
           setLayer(LAYER_NAMES[digitIdx]);
         }
-        // L = nÃ¤chste Ebene durchschalten
+        // L = nächste Ebene durchschalten
         if (k === "l" || k === "L") {
           const cur = LAYER_NAMES.indexOf(editRef.current.layer ?? "walk");
           setLayer(LAYER_NAMES[(cur + 1) % LAYER_NAMES.length]);
@@ -2942,6 +3871,27 @@ export default function App() {
         keysRef.current.add(k);
         camRef.current.follow = false;
         e.preventDefault();
+      }
+      // Portal: Ausgang mit 1–9 wählen (nur aktive Figur, nur im Spielmodus)
+      if (g.portal && g.portal.options.length) {
+        const di = "123456789".indexOf(k);
+        if (di >= 0 && di < g.portal.options.length) {
+          const c = g.chars[g.selected];
+          const o = g.portal.options[di];
+          c.x = o.x;
+          c.y = o.y;
+          c.path = [];
+          c.jump = null;
+          c.koTarget = null;
+          c.attackTarget = null;
+          pushMessage(
+            g.portal.kind === "jump"
+              ? c.name + " springt hinüber!"
+              : c.name + " schlüpft durch " + (g.portal.name || "den Gang") + ".",
+          );
+          g.portal = null;
+          return;
+        }
       }
       if (g.status !== "playing") return;
       if (k === "p" || k === "P" || k === " ") {
@@ -3031,18 +3981,24 @@ export default function App() {
       if (Math.hypot(tr.from.x - w.x, tr.from.y - w.y) < th) return { kind: "trans", ti, key: "from" };
       if (Math.hypot(tr.to.x - w.x, tr.to.y - w.y) < th) return { kind: "trans", ti, key: "to" };
     }
-    // Punkte der ausgewÃ¤hlten Ebene zuerst
-    const polys = map.layers[layer];
-    for (let pi = polys.length - 1; pi >= 0; pi--) {
-      const pts = polys[pi].pts;
-      for (let vi = pts.length - 1; vi >= 0; vi--) {
-        if (Math.hypot(pts[vi].x - w.x, pts[vi].y - w.y) < th)
-          return { kind: "vertex", layer, index: pi, vi };
+    // Punkte der ausgewählten (ggf. zusammengefassten) Ebenen zuerst
+    const groupLayers = editLayersOf(layer);
+    for (const ln of groupLayers) {
+      const polys = map.layers[ln];
+      for (let pi = polys.length - 1; pi >= 0; pi--) {
+        const pts = polys[pi].pts;
+        for (let vi = pts.length - 1; vi >= 0; vi--) {
+          if (Math.hypot(pts[vi].x - w.x, pts[vi].y - w.y) < th)
+            return { kind: "vertex", layer: ln, index: pi, vi };
+        }
       }
     }
-    // dann FlÃ¤chen â ausschlieÃlich der ausgewÃ¤hlten Ebene
-    for (let pi = polys.length - 1; pi >= 0; pi--) {
-      if (pointInPoly(w.x, w.y, polys[pi].pts)) return { kind: "poly", layer, index: pi };
+    // dann Flächen – nur der ausgewählten (ggf. zusammengefassten) Ebenen
+    for (const ln of groupLayers) {
+      const polys = map.layers[ln];
+      for (let pi = polys.length - 1; pi >= 0; pi--) {
+        if (pointInPoly(w.x, w.y, polys[pi].pts)) return { kind: "poly", layer: ln, index: pi };
+      }
     }
     return null;
   };
@@ -3052,7 +4008,7 @@ export default function App() {
     const w = toWorld(lx, ly);
     if (modeRef.current === "edit") {
       const ed = editRef.current;
-      // KÃ¶der-Position wÃ¤hlen: Klick setzt eff.at des ausgewÃ¤hlten noise-Objekts
+      // Köder-Position wählen: Klick setzt eff.at des ausgewählten noise-Objekts
       if (ed.pickNoiseFor && ed.pickNoiseFor.layer === "interact") {
         const poly = mapRef.current.layers.interact[ed.pickNoiseFor.index];
         if (poly) {
@@ -3156,7 +4112,7 @@ export default function App() {
     if (!h) return;
     const poly = mapRef.current.layers[ed.selected.layer][ed.selected.index];
     const pts = poly.pts;
-    // nÃ¤chsten Randpunkt suchen und Eckpunkt einfÃ¼gen
+    // nächsten Randpunkt suchen und Eckpunkt einfügen
     let best = null;
     for (let i = 0; i < pts.length; i++) {
       const a = pts[i];
@@ -3185,10 +4141,10 @@ export default function App() {
       const c = g.chars[g.selected];
       if (c.caught) return;
 
-      // Ctrl = Auswahlmodus: nur Figuren auswÃ¤hlen, keine Befehle
+      // Ctrl = Auswahlmodus: nur Figuren auswählen, keine Befehle
       if (ctrl) {
         for (let i = 0; i < g.chars.length; i++) {
-          if (i === g.selected) continue; // bereits ausgewÃ¤hlte Figur nicht erneut wÃ¤hlen
+          if (i === g.selected) continue; // bereits ausgewählte Figur nicht erneut wählen
           const ch = g.chars[i];
           if (ch.caught) continue;
           if (Math.hypot(ch.x - wx, ch.y - (wy + 10)) < 30 / cam.z) {
@@ -3198,13 +4154,14 @@ export default function App() {
         }
         // Interaktionsobjekt: Strg+Klick auf Polygon, Figur muss darin stehen
         for (const poly of g.map.layers.interact ?? []) {
+          if ((poly.effect ?? {}).enter) continue; // Betreten-Trigger: nicht klickbar
           if (!pointInPoly(wx, wy, poly.pts)) continue;
           if ((g.interacted ??= new Set()).has(poly)) {
             pushMessage("Hier gibt es nichts mehr zu holen.");
             return;
           }
           if (!pointInPoly(c.x, c.y, poly.pts)) {
-            pushMessage(`${c.name} muss dafÃ¼r nÃ¤her heran (im Objekt stehen).`);
+            pushMessage(`${c.name} muss dafür näher heran (im Objekt stehen).`);
             return;
           }
           runInteraction(g, poly, c, pushMessage);
@@ -3241,9 +4198,9 @@ export default function App() {
           const m = matchupMod(c.weapon.cat, guard.weapon.cat);
           pushMessage(
             m.dmg > 1
-              ? `${c.name} greift an â Waffenvorteil!`
+              ? `${c.name} greift an – Waffenvorteil!`
               : m.dmg < 1
-                ? `${c.name} greift an â Waffennachteil!`
+                ? `${c.name} greift an – Waffennachteil!`
                 : `${c.name} greift an.`,
           );
           return;
@@ -3263,7 +4220,7 @@ export default function App() {
         return;
       }
 
-      // BeschieÃbares Interaktionsobjekt im Bogen-Modus (targetable)
+      // Beschießbares Interaktionsobjekt im Bogen-Modus (targetable)
       if (bowActive(c, g)) {
         for (const poly of g.map.layers.interact ?? []) {
           if (!(poly.effect ?? {}).targetable) continue;
@@ -3273,11 +4230,11 @@ export default function App() {
         }
       }
 
-      // RÃ¼ckzug aus dem Kampf (Klick auf freie FlÃ¤che)
+      // Rückzug aus dem Kampf (Klick auf freie Fläche)
       if (c.engaged.length > 0) {
         const free = c.canAcro && inAnyPoly(g.map.layers.acro ?? [], c);
         if (!free && c.stamina < COMBAT.disengageCost) {
-          pushMessage(`${c.name} ist zu erschÃ¶pft fÃ¼r den RÃ¼ckzug!`);
+          pushMessage(`${c.name} ist zu erschöpft für den Rückzug!`);
           return;
         }
         if (!free) c.stamina -= COMBAT.disengageCost;
@@ -3288,7 +4245,7 @@ export default function App() {
         c.engaged = [];
         c.attackTarget = null;
         c.disengageUntil = g.time + 2.5;
-        pushMessage(free ? `${c.name} entkommt mit einem Sprung!` : `${c.name} lÃ¶st sich aus dem Kampf.`);
+        pushMessage(free ? `${c.name} entkommt mit einem Sprung!` : `${c.name} löst sich aus dem Kampf.`);
       }
 
       c.koTarget = null;
@@ -3319,15 +4276,18 @@ export default function App() {
       last = now;
       const g = gameRef.current;
       const cam = camRef.current;
-      const map = mapRef.current;
+      let map = mapRef.current;
       if (!g.paused) g.time += dt;
 
       if (modeRef.current === "play" && g.status === "playing" && !g.paused) {
         updateGame(g, dt, pushMessage);
         if (g.pendingMap) {
-          if (applyMapChange(g)) pushMessage("Neues Gebiet betreten.");
-          else pushMessage("Diese TÃ¼r fÃ¼hrt nirgendwohin.");
+          if (applyMapChange(g)) {
+            pushMessage("Neues Gebiet betreten.");
+            saveSession();
+          } else pushMessage("Diese Tür führt nirgendwohin.");
         }
+        if (g.status === "won") markWon(g.mapId ?? mapIdRef.current);
       }
       if (!g.paused) {
         if (g.whistleFx) {
@@ -3340,6 +4300,24 @@ export default function App() {
         }
         for (const fx of g.combatFx ?? []) fx.t += dt;
         if (g.combatFx) g.combatFx = g.combatFx.filter((fx) => fx.t <= 1.2);
+      }
+
+      // Kartenwechsel (map-Effekt / nächste Karte): Engine hat g.mapId gesetzt,
+      // hier Sicht + Karte synchronisieren
+      if (g.mapId && g.mapId !== mapIdRef.current) {
+        const game = activeGameRef.current;
+        const ent = game
+          ? mapCacheRef.current.get(game.id + "/" + g.mapId)
+          : null;
+        if (ent) {
+          mapIdRef.current = g.mapId;
+          mapRef.current = ent.data;
+          applyMapToView(ent);
+          map = ent.data;
+          camRef.current.follow = true;
+          pushMessage("Karte gewechselt: " + (ent.name ?? g.mapId));
+          saveSession();
+        }
       }
 
       // Kamera
@@ -3437,7 +4415,7 @@ export default function App() {
     };
     raf = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(raf);
-  }, [pushMessage]);
+  }, [pushMessage, markWon, saveSession]);
 
   const alarmLabel = ["Ruhig", "Misstrauisch", "ALARM!"][ui.alarm];
   const alarmClass = [
@@ -3452,11 +4430,11 @@ export default function App() {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h1 className="font-serif text-2xl font-semibold tracking-wide text-amber-100">
-              Sherwood <span className="text-sm font-normal text-stone-400">â Polygon-Karte & Editor</span>
+              Sherwood <span className="text-sm font-normal text-stone-400">– Polygon-Karte & Editor</span>
             </h1>
             <p className="text-xs text-stone-400">
-              Stealth-Taktik im Stil von âRobin Hood: The Legend of Sherwoodâ Â· LaufflÃ¤chen, Verstecke und
-              Sichtblocker als Polygone
+              Stealth-Taktik im Stil von „Robin Hood: The Legend of Sherwood“ · Laufflächen, Verstecke und
+              Sichtblocker als Polygone · Spielsammlungen lokal oder aus Git-Repos
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -3467,12 +4445,15 @@ export default function App() {
                   {ui.hidden ? "Im Versteck" : "Sichtbar!"}
                 </Badge>
                 <Badge className={ui.gold ? "bg-yellow-700/60 text-yellow-100" : "bg-stone-800/70 text-stone-300"}>
-                  {ui.gold ? "Gold erbeutet â flieht!" : "Ziel: Goldtruhe"}
+                  {ui.gold ? "Gold erbeutet – flieht!" : "Ziel: Goldtruhe"}
                 </Badge>
                 <Badge className="bg-stone-800/70 text-stone-300">K.o.: {ui.knocked}</Badge>
               </>
             )}
             {mode === "edit" && <Badge className="bg-sky-900/60 text-sky-200">Editor aktiv</Badge>}
+            <Button size="sm" variant="outline" onClick={() => setMenuOpen(true)}>
+              {activeGame ? "Spiel: " + activeGame.name : "Spiel wählen"}
+            </Button>
             {mode === "play" ? (
               <Button size="sm" variant="outline" onClick={enterEditor}>
                 Karten-Editor
@@ -3505,8 +4486,8 @@ export default function App() {
             <div className="pointer-events-none absolute bottom-2 right-3 text-[10px] text-stone-400">
               {mode === "play"
                 ? (ui.follow ? "Kamera folgt (Pfeile: frei, Rad: Zoom)" : "Freie Kamera (F: folgen, Rad: Zoom)")
-                : "Editor: Klick = Punkt, Doppelklick = fertig/Edge-Punkt, Ziehen = verschieben Â· N: neues Polygon Â· 1â0/-: Ebene Â· L: Ebene weiter"}
-              {imgOk ? " Â· Bild geladen" : " Â· Ersatzkarte (Bild nicht ladbar)"}
+                : "Editor: Klick = Punkt, Doppelklick = fertig/Edge-Punkt, Ziehen = verschieben · N: neues Polygon · 1–0/-: Ebene · L: Ebene weiter"}
+              {imgOk ? " · Bild geladen" : " · Ersatzkarte (Bild nicht ladbar)"}
             </div>
             {mode === "play" && ui.paused && (
               <div className="absolute inset-x-0 top-6 flex justify-center">
@@ -3522,12 +4503,17 @@ export default function App() {
                 </h2>
                 <p className="max-w-md text-center text-sm text-stone-300">
                   {ui.status === "won"
-                    ? "Das Gold des Sheriffs ist zurÃ¼ck im Wald. Die Legende von Sherwood wÃ¤chst."
+                    ? "Das Gold des Sheriffs ist zurück im Wald. Die Legende von Sherwood wächst."
                     : "Eine Wache hat euch ergriffen. Im Kerker von Nottingham wartet ihr auf die Rettung."}
                 </p>
                 <Button onClick={restart} className="bg-amber-700 text-white hover:bg-amber-600">
                   Neue Mission (R)
                 </Button>
+                {ui.status === "won" && hasNextMap() && (
+                  <Button onClick={goNextMap} className="bg-emerald-700 text-white hover:bg-emerald-600">
+                    Nächste Karte
+                  </Button>
+                )}
               </div>
             )}
           </div>
@@ -3596,11 +4582,11 @@ export default function App() {
                         onClick={toggleBow}
                       >
                         {ui.bow === "switch"
-                          ? "Bogen spannt â¦"
+                          ? "Bogen spannt …"
                           : ui.bow === "stow"
-                            ? "Robin packt den Bogen weg â¦"
+                            ? "Robin packt den Bogen weg …"
                             : ui.bow === "unbow"
-                              ? "Bogen wird abgehÃ¤ngt â¦"
+                              ? "Bogen wird abgehängt …"
                               : ui.bow === "ready"
                                 ? "Bogen bereit"
                                 : "Bogen"}{" "}
@@ -3641,18 +4627,18 @@ export default function App() {
                     </Button>
                   </div>
                   <p className="mt-2 text-[10px] leading-snug text-stone-400">
-                    Im Versteck (grÃ¼n gestrichelt) bleibt ihr unentdeckt â bis eine Wache das Versteck selbst
-                    betritt: Dann sieht sie alles darin. Posten werden regelmÃ¤Ãig abgelenkt (Punkte Ã¼ber dem
+                    Im Versteck (grün gestrichelt) bleibt ihr unentdeckt – bis eine Wache das Versteck selbst
+                    betritt: Dann sieht sie alles darin. Posten werden regelmäßig abgelenkt (Punkte über dem
                     Helm). Wachen gibt es aufmerksam (offenes Auge, weiter Kegel) und unaufmerksam (Lidstrich,
-                    enger und kÃ¼rzer). Alarmierte Wachen sehen enger, aber weiter; kÃ¤mpfende Wachen haben
-                    Tunnelblick auf ihr Ziel. Blaue FlÃ¤chen = Klettern (nur Robin, langsam), rosa FlÃ¤chen =
-                    Akrobatik (nur Marian, schnell). Violette TÃ¼rchen teleportieren, gelbe BÃ¶gen sind
-                    SprungÃ¼bergÃ¤nge.
+                    enger und kürzer). Alarmierte Wachen sehen enger, aber weiter; kämpfende Wachen haben
+                    Tunnelblick auf ihr Ziel. Blaue Flächen = Klettern (nur Robin, langsam), rosa Flächen =
+                    Akrobatik (nur Marian, schnell). Violette Türchen teleportieren, gelbe Bögen sind
+                    Sprungübergänge.
                   </p>
                   <p className="mt-1 text-stone-400">
-                    Bewegung: Es sind nur Klicks in das eigene oder ein angrenzendes Polygon mÃ¶glich; entferntere
-                    Ziele mÃ¼ssen Ã¼ber Zwischenwege (oder TÃ¼ren/SprÃ¼nge) erreicht werden. Geheimgang (violette
-                    TÃ¼rchen): auf die FlÃ¤che hinter dem anderen TÃ¼r-Ende klicken â die Figur lÃ¤uft zum TÃ¼rchen und
+                    Bewegung: Es sind nur Klicks in das eigene oder ein angrenzendes Polygon möglich; entferntere
+                    Ziele müssen über Zwischenwege (oder Türen/Sprünge) erreicht werden. Geheimgang (violette
+                    Türchen): auf die Fläche hinter dem anderen Tür-Ende klicken – die Figur läuft zum Türchen und
                     wird durchteleportiert.
                   </p>
                 </div>
@@ -3660,26 +4646,26 @@ export default function App() {
                 <div className="rounded-lg border border-stone-700/60 bg-stone-900/40 p-3 text-[11px] leading-relaxed text-stone-300">
                   <p className="mb-1 font-semibold text-stone-100">Steuerung</p>
                   <p>Klick: Figur bewegen / Wache ausschalten</p>
-                  <p>Strg+Klick auf Figur: nur auswÃ¤hlen (kein Befehl)</p>
-                  <p>Strg+Klick auf Interaktion (violette Raute): auslÃ¶sen</p>
+                  <p>Strg+Klick auf Figur: nur auswählen (kein Befehl)</p>
+                  <p>Strg+Klick auf Interaktion (violette Raute): auslösen</p>
                   <p>Shift+Klick auf Wache: Kampf aufnehmen</p>
-                  <p>Klick daneben im Kampf: RÃ¼ckzug (25 Ausdauer)</p>
+                  <p>Klick daneben im Kampf: Rückzug (25 Ausdauer)</p>
                   <p>Ziehen, Pfeiltasten, Mausrad: Kamera</p>
-                  <p>1â3: Figur Â· F: folgen Â· V: LaufflÃ¤chen</p>
-                  <p>S: Schleichen Â· Q: Pfeifen Â· R: Neustart</p>
-                  <p>B: Bogen-Modus (nur Robin) â Umschalten dauert, mit gespanntem Bogen kein Schritt</p>
+                  <p>1–3: Figur · F: folgen · V: Laufflächen</p>
+                  <p>S: Schleichen · Q: Pfeifen · R: Neustart</p>
+                  <p>B: Bogen-Modus (nur Robin) – Umschalten dauert, mit gespanntem Bogen kein Schritt</p>
                   <p>
-                    Bogen aktiv: Klick auf Wache oder beschieÃbares Objekt (violett, Ziel-Markierung)
-                    schieÃt einen Pfeil â braucht freie Sichtlinie und Reichweite. Wird Robin im
-                    Bogen-Modus angegriffen, packt er den Bogen innerhalb einer Sekunde weg â in der
-                    Zeit kÃ¤mpft er nicht und verliert die Initiative. Pfeile im KÃ¶cher sind
-                    begrenzt, jeder Schuss macht ein leises GerÃ¤usch. Pfeile treffen auch bewegte Wachen.
+                    Bogen aktiv: Klick auf Wache oder beschießbares Objekt (violett, Ziel-Markierung)
+                    schießt einen Pfeil – braucht freie Sichtlinie und Reichweite. Wird Robin im
+                    Bogen-Modus angegriffen, packt er den Bogen innerhalb einer Sekunde weg – in der
+                    Zeit kämpft er nicht und verliert die Initiative. Pfeile im Köcher sind
+                    begrenzt, jeder Schuss macht ein leises Geräusch. Pfeile treffen auch bewegte Wachen.
                   </p>
                   <p>P / Leertaste: Pause</p>
                   <p className="mt-1 text-stone-400">
-                    Waffen-Dreieck: Schwert schlÃ¤gt Schwer, Schwer schlÃ¤gt Speer, Speer schlÃ¤gt Schwert (Ringfarbe).
-                    RingstÃ¤rke = Stufe, Punkte Ã¼ber dem Helm = Kampffertigkeit (1â4). Robin und John sind erfahrene
-                    Krieger, Marian nicht â 3 Gegner sind knapp machbar, 4 nicht, Kampf erzeugt LÃ¤rm (rote Ringe).
+                    Waffen-Dreieck: Schwert schlägt Schwer, Schwer schlägt Speer, Speer schlägt Schwert (Ringfarbe).
+                    Ringstärke = Stufe, Punkte über dem Helm = Kampffertigkeit (1–4). Robin und John sind erfahrene
+                    Krieger, Marian nicht – 3 Gegner sind knapp machbar, 4 nicht, Kampf erzeugt Lärm (rote Ringe).
                   </p>
                 </div>
               </>
@@ -3688,21 +4674,51 @@ export default function App() {
                 <div className="rounded-lg border border-stone-700/60 bg-stone-900/40 p-3">
                   <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-stone-400">Ebene</p>
                   <div className="flex flex-col gap-1">
-                    {LAYER_NAMES.map((ln) => (
-                      <button
-                        key={ln}
-                        onClick={() => setLayer(ln)}
-                        className={`flex items-center gap-2 rounded border px-2 py-1.5 text-left text-xs ${
-                          layer === ln ? "border-amber-500 bg-amber-900/30" : "border-stone-700 hover:border-stone-500"
-                        }`}
-                      >
-                        <span
-                          className="h-3 w-3 rounded-sm"
-                          style={{ backgroundColor: LAYER_STYLE[ln].stroke }}
-                        />
-                        {LAYER_STYLE[ln].label}
-                      </button>
-                    ))}
+                    {EDIT_GROUPS.map((g) => {
+                      const ln0 = g.layers[0];
+                      const active = g.layers.includes(layer);
+                      const label = g.label ?? LAYER_STYLE[ln0].label;
+                      return (
+                        <div key={g.layers.join("+")} className="flex flex-col gap-1">
+                          <button
+                            onClick={() => {
+                              setLayer(ln0);
+                              setNewTarget(ln0);
+                            }}
+                            className={`flex items-center gap-2 rounded border px-2 py-1.5 text-left text-xs ${
+                              active ? "border-amber-500 bg-amber-900/30" : "border-stone-700 hover:border-stone-500"
+                            }`}
+                          >
+                            {g.layers.length > 1 ? (
+                              <span className="flex w-3 gap-0.5">
+                                <span className="h-3 w-1.5 rounded-sm" style={{ backgroundColor: LAYER_STYLE[g.layers[0]].stroke }} />
+                                <span className="h-3 w-1.5 rounded-sm" style={{ backgroundColor: LAYER_STYLE[g.layers[1]].stroke }} />
+                              </span>
+                            ) : (
+                              <span className="h-3 w-3 rounded-sm" style={{ backgroundColor: LAYER_STYLE[ln0].stroke }} />
+                            )}
+                            {label}
+                          </button>
+                          {g.sub && active && (
+                            <div className="ml-5 flex gap-1">
+                              {g.layers.map((sl) => (
+                                <button
+                                  key={sl}
+                                  onClick={() => setNewTarget(sl)}
+                                  className={`rounded border px-1.5 py-0.5 text-[10px] ${
+                                    newTarget === sl
+                                      ? "border-amber-500 text-amber-200"
+                                      : "border-stone-700 text-stone-400 hover:border-stone-500"
+                                  }`}
+                                >
+                                  Neu: {LAYER_STYLE[sl].label}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
 
@@ -3736,7 +4752,7 @@ export default function App() {
                       disabled={!editInfo.selected && editInfo.selectedGuard === null}
                       onClick={editInfo.selectedGuard !== null ? deleteGuard : deleteSelected}
                     >
-                      LÃ¶schen (Entf)
+                      Löschen (Entf)
                     </Button>
                   </div>
                   <input
@@ -3749,13 +4765,14 @@ export default function App() {
                         setEditInfo((p) => ({ ...p, name: e.target.value }));
                       }
                     }}
-                    placeholder="Name des ausgewÃ¤hlten Polygons (z. B. Dorf, Burg, Fluss)"
+                    placeholder="Name des ausgewählten Polygons (z. B. Dorf, Burg, Fluss)"
                     className="mt-2 w-full rounded border border-stone-700 bg-stone-950 px-2 py-1.5 text-xs text-stone-200 placeholder:text-stone-500 disabled:opacity-40"
                   />
                   <p className="mt-2 text-[10px] leading-snug text-stone-400">
-                    Nur Polygone der ausgewÃ¤hlten Ebene sind anklickbar â Ã¼bereinander liegende FlÃ¤chen
-                    sind so getrennt editierbar. Kletter-/Akrobatik- und Start-/Ziel-FlÃ¤chen sind eigene
-                    Ebenen, Sperren (blocking) blockieren jede Bewegung.
+                    Hindernis & Sichtblocker sowie Start/Flucht & Ziel sind jeweils zu einer Gruppe
+                    zusammengefasst – per „Neu“-Knopf wird gewählt, auf welche der beiden Teilebenen
+                    neue Polygone gelegt werden. Angeklickt werden alle sichtbaren Flächen,
+                    Sperren (blocking) blockieren jede Bewegung.
                   </p>
                   {editInfo.layer === "interact" && editInfo.effect && (
                     <div className="mt-2 flex flex-col gap-1.5 rounded border border-violet-800/50 bg-violet-950/20 p-2">
@@ -3778,7 +4795,15 @@ export default function App() {
                           checked={!!editInfo.effect.targetable}
                           onChange={(e) => setInteractEffect("targetable", e.target.checked)}
                         />
-                        Aus der Distanz beschieÃbar (Bogen)
+                        Aus der Distanz beschießbar (Bogen)
+                      </label>
+                      <label className="flex items-center gap-2 text-xs text-stone-300">
+                        <input
+                          type="checkbox"
+                          checked={!!editInfo.effect.enter}
+                          onChange={(e) => setInteractEffect("enter", e.target.checked)}
+                        />
+                        Beim Betreten auslösen (im Spiel unsichtbar, kein Strg+Klick)
                       </label>
                       {["msg", "item"].includes(editInfo.effect.type) && (
                         <input
@@ -3791,7 +4816,7 @@ export default function App() {
                       )}
                       {editInfo.effect.type === "stamina" && (
                         <label className="flex items-center gap-2 text-xs text-stone-300">
-                          Gilt fÃ¼r
+                          Gilt für
                           <select
                             value={editInfo.effect.scope ?? "all"}
                             onChange={(e) => setInteractEffect("scope", e.target.value)}
@@ -3830,7 +4855,7 @@ export default function App() {
                         <div className="flex flex-col gap-1.5">
                           <p className="text-[10px] font-semibold uppercase tracking-wide text-violet-300">Zielpolygone</p>
                           <p className="text-[10px] text-stone-500">
-                            BetÃ¤ubt Wachen im Interaktions-Polygon selbst und in allen hier gelisteten FlÃ¤chen.
+                            Betäubt Wachen im Interaktions-Polygon selbst und in allen hier gelisteten Flächen.
                           </p>
                           {(editInfo.effect.targets ?? []).map((t, ti) => {
                             const found =
@@ -3853,7 +4878,7 @@ export default function App() {
                                   }}
                                   className="text-red-400 hover:text-red-300"
                                 >
-                                  â
+                                  ✕
                                 </button>
                               </div>
                             );
@@ -3869,11 +4894,11 @@ export default function App() {
                             }}
                             className="rounded border border-stone-700 bg-stone-950 px-1.5 py-1 text-xs text-stone-200"
                           >
-                            <option value="">+ Zielpolygon hinzufÃ¼gen â¦</option>
+                            <option value="">+ Zielpolygon hinzufügen …</option>
                             {LAYER_NAMES.flatMap((ln) =>
                               (mapRef.current.layers[ln] ?? []).map((p, pi) => (
                                 <option key={`${ln}:${pi}`} value={`${ln}:${pi}`}>
-                                  {LAYER_STYLE[ln]?.label ?? ln} Â· {p.name || `Polygon ${pi + 1}`}
+                                  {LAYER_STYLE[ln]?.label ?? ln} · {p.name || `Polygon ${pi + 1}`}
                                 </option>
                               )),
                             )}
@@ -3898,14 +4923,14 @@ export default function App() {
                             onClick={pickNoisePos}
                           >
                             {editRef.current.pickNoiseFor
-                              ? "Position anklicken â¦ (abbrechen mit erneutem Klick)"
+                              ? "Position anklicken … (abbrechen mit erneutem Klick)"
                               : editInfo.effect.at
-                                ? "GerÃ¤uschposition Ã¤ndern"
-                                : "GerÃ¤uschposition festlegen"}
+                                ? "Geräuschposition ändern"
+                                : "Geräuschposition festlegen"}
                           </Button>
                           {editInfo.effect.at && (
                             <p className="text-[10px] text-stone-500">
-                              GerÃ¤usch bei ({Math.round(editInfo.effect.at.x)}|{Math.round(editInfo.effect.at.y)})
+                              Geräusch bei ({Math.round(editInfo.effect.at.x)}|{Math.round(editInfo.effect.at.y)})
                             </p>
                           )}
                         </div>
@@ -3922,13 +4947,29 @@ export default function App() {
                         </label>
                       )}
                       {editInfo.effect.type === "map" && (
-                        <input
-                          type="text"
-                          value={editInfo.effect.map ?? editInfo.effect.text ?? ""}
-                          onChange={(e) => setInteractEffect("map", e.target.value)}
-                          placeholder="SchlÃ¼ssel der Zielkarte (mapPool) oder JSON inline"
-                          className="rounded border border-stone-700 bg-stone-950 px-2 py-1 text-xs text-stone-200"
-                        />
+                        activeGame ? (
+                          <select
+                            value={editInfo.effect.map ?? ""}
+                            onChange={(e) => setInteractEffect("map", e.target.value)}
+                            className="rounded border border-stone-700 bg-stone-950 px-1.5 py-1 text-xs text-stone-200"
+                          >
+                            <option value="">-- Zielkarte wählen --</option>
+                            {activeGame.maps.map((m) => (
+                              <option key={m.id} value={m.id}>
+                                {m.name ?? m.id}
+                                {m.id === (gameRef.current.mapId ?? mapIdRef.current) ? " (aktuell)" : ""}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <input
+                            type="text"
+                            value={editInfo.effect.map ?? editInfo.effect.text ?? ""}
+                            onChange={(e) => setInteractEffect("map", e.target.value)}
+                            placeholder="Schlüssel der Zielkarte (mapPool) oder JSON inline"
+                            className="rounded border border-stone-700 bg-stone-950 px-2 py-1 text-xs text-stone-200"
+                          />
+                        )
                       )}
                       {editInfo.effect.type === "alarm" && (
                         <div className="flex flex-col gap-1.5">
@@ -3958,7 +4999,7 @@ export default function App() {
                                 }}
                                 className="text-red-400 hover:text-red-300"
                               >
-                                â
+                                ✕
                               </button>
                             </div>
                           ))}
@@ -3991,7 +5032,7 @@ export default function App() {
                                   }}
                                   className="text-red-400 hover:text-red-300"
                                 >
-                                  â
+                                  ✕
                                 </button>
                               </div>
                             );
@@ -4007,11 +5048,11 @@ export default function App() {
                             }}
                             className="rounded border border-stone-700 bg-stone-950 px-1.5 py-1 text-xs text-stone-200"
                           >
-                            <option value="">+ ZielflÃ¤che hinzufÃ¼gen â¦</option>
+                            <option value="">+ Zielfläche hinzufügen …</option>
                             {LAYER_NAMES.filter((ln) => ln !== "paths").flatMap((ln) =>
                               (mapRef.current.layers[ln] ?? []).map((p, pi) => (
                                 <option key={`${ln}:${pi}`} value={`${ln}:${pi}`}>
-                                  {LAYER_STYLE[ln]?.label ?? ln} Â· {p.name || `Polygon ${pi + 1}`}
+                                  {LAYER_STYLE[ln]?.label ?? ln} · {p.name || `Polygon ${pi + 1}`}
                                 </option>
                               )),
                             )}
@@ -4035,7 +5076,7 @@ export default function App() {
                                   <option key={gi} value={gi}>Wache {gi + 1}</option>
                                 ))}
                               </select>
-                              <span className="text-[10px] text-stone-500">â</span>
+                              <span className="text-[10px] text-stone-500">→</span>
                               <select
                                 value={asg.path ?? ""}
                                 onChange={(e) => {
@@ -4045,7 +5086,7 @@ export default function App() {
                                 }}
                                 className="rounded border border-stone-700 bg-stone-950 px-1 py-1 text-[10px] text-stone-200"
                               >
-                                <option value="">â Posten (1. Punkt) â</option>
+                                <option value="">— Posten (1. Punkt) —</option>
                                 {(mapRef.current.layers.paths ?? []).map((p, pi) => (
                                   <option key={pi} value={p.name ?? `Pfad ${pi + 1}`}>
                                     {p.name || `Pfad ${pi + 1}`}
@@ -4060,7 +5101,7 @@ export default function App() {
                                 }}
                                 className="ml-auto text-[10px] text-red-400 hover:text-red-300"
                               >
-                                â
+                                ✕
                               </button>
                             </div>
                           ))}
@@ -4076,7 +5117,7 @@ export default function App() {
                             + Zuweisung
                           </Button>
                           <p className="text-[10px] text-stone-500">
-                            Pfade vorher in der Ebene âWachenpfade &amp; ÃbergÃ¤ngeâ zeichnen und benennen.
+                            Pfade vorher in der Ebene „Wachenpfade &amp; Übergänge“ zeichnen und benennen.
                           </p>
                         </div>
                       )}
@@ -4091,8 +5132,8 @@ export default function App() {
                     </div>
                   )}
                   <p className="mt-2 text-[10px] leading-snug text-stone-400">
-                    Klick setzt Punkte, Klick auf den ersten Punkt oder Doppelklick schlieÃt das Polygon. Punkte und
-                    FlÃ¤chen verschieben; Doppelklick auf eine Kante fÃ¼gt einen Punkt ein.
+                    Klick setzt Punkte, Klick auf den ersten Punkt oder Doppelklick schließt das Polygon. Punkte und
+                    Flächen verschieben; Doppelklick auf eine Kante fügt einen Punkt ein.
                   </p>
                 </div>
 
@@ -4107,9 +5148,9 @@ export default function App() {
                     </Button>
                   </div>
                   <p className="mt-2 text-[10px] leading-snug text-stone-400">
-                    Patrouillen laufen benannte Pfade aus der Ebene âWachenpfade &amp; ÃbergÃ¤ngeâ ab (im
-                    Wachen-Panel zuweisen) oder eigene AâB-Endpunkte. Posten: Standpunkt + Blickpunkt.
-                    Start (grÃ¼n) und Ziel (gelb) liegen auf eigenen Ebenen. Wachen-Punkte auf LaufflÃ¤chen
+                    Patrouillen laufen benannte Pfade aus der Ebene „Wachenpfade &amp; Übergänge“ ab (im
+                    Wachen-Panel zuweisen) oder eigene A↔B-Endpunkte. Posten: Standpunkt + Blickpunkt.
+                    Start (grün) und Ziel (gelb) liegen auf eigenen Ebenen. Wachen-Punkte auf Laufflächen
                     legen, sonst laufen sie nicht.
                   </p>
                   {editInfo.selectedGuard !== null && (
@@ -4139,7 +5180,7 @@ export default function App() {
                         </select>
                       </label>
                       <p className="w-full text-[10px] text-stone-500">
-                        Auswahl: {editInfo.guardWeapon ? weaponName(editInfo.guardWeapon) : "â"} Â· Dreieck: Schwert
+                        Auswahl: {editInfo.guardWeapon ? weaponName(editInfo.guardWeapon) : "—"} · Dreieck: Schwert
                         &gt; Schwer &gt; Speer &gt; Schwert
                       </p>
                       <label className="flex flex-col gap-1 text-[10px] text-stone-400">
@@ -4151,23 +5192,23 @@ export default function App() {
                         >
                           {Object.entries(SKILLS).map(([key, s]) => (
                             <option key={key} value={key}>
-                              {s.label} (Ã{s.mult})
+                              {s.label} (×{s.mult})
                             </option>
                           ))}
                         </select>
                       </label>
                       <p className="w-full text-[10px] text-stone-500">
-                        Fertigkeit: {editInfo.guardSkill ? SKILLS[editInfo.guardSkill].label : "â"} Â· im Spiel als
-                        Punkte Ã¼ber dem Helm (1â4)
+                        Fertigkeit: {editInfo.guardSkill ? SKILLS[editInfo.guardSkill].label : "—"} · im Spiel als
+                        Punkte über dem Helm (1–4)
                       </p>
                       <label className="flex flex-col gap-1 text-[10px] text-stone-400">
-                        Pfad (aus Ebene âWachenpfadeâ)
+                        Pfad (aus Ebene „Wachenpfade“)
                         <select
                           value={editInfo.guardPath}
                           onChange={(e) => setGuardPath(e.target.value)}
                           className="rounded border border-stone-700 bg-stone-950 px-1.5 py-1 text-xs text-stone-200"
                         >
-                          <option value="">â eigener Weg (A/B bzw. Posten) â</option>
+                          <option value="">— eigener Weg (A/B bzw. Posten) —</option>
                           {(mapRef.current.layers.paths ?? []).map((p, i) => (
                             <option key={i} value={p.name ?? `Pfad ${i + 1}`}>
                               {p.name || `Pfad ${i + 1}`} ({p.pts.length} Punkte)
@@ -4180,23 +5221,66 @@ export default function App() {
                 </div>
 
                 <div className="rounded-lg border border-stone-700/60 bg-stone-900/40 p-3">
-                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-stone-400">ÃbergÃ¤nge</p>
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-stone-400">Übergänge</p>
                   <div className="flex flex-wrap gap-2">
                     <Button size="sm" variant="outline" onClick={addJump}>
                       + Sprung
                     </Button>
                     <Button size="sm" variant="outline" onClick={addDoor}>
-                      + TÃ¼r
+                      + Tür
                     </Button>
                     <Button size="sm" variant="outline" disabled={editInfo.selectedTrans === null} onClick={deleteTrans}>
-                      LÃ¶schen (Entf)
+                      Löschen (Entf)
                     </Button>
                   </div>
                   <p className="mt-2 text-[10px] leading-snug text-stone-400">
-                    Sprung (gelb, Bogen): nur Akrobaten springen im Bogen von A nach B. TÃ¼r (violett): alle Figuren
-                    werden teleportiert. Beide Endpunkte auf begehbare FlÃ¤chen legen und ziehen zum Anpassen.
+                    Portale sind seit der Umstellung NICHT mehr Teil der Wegfindung: Figuren laufen bis zum
+                    Eingangspunkt, sehen dort die möglichen Ausgänge als nummerierte Marker und wählen mit
+                    Taste 1–9. Sprünge (gelb, Bogen) können nur Akrobaten benutzen, Türen (violett) alle.
+                    Übergänge mit gleichem Namen bilden ein Portal mit mehreren Ausgängen. Beide Endpunkte
+                    auf begehbare Flächen legen und ziehen zum Anpassen.
                   </p>
                 </div>
+
+                {mode === "edit" && activeGame && (
+                  <div className="rounded-lg border border-stone-700/60 bg-stone-900/40 p-3">
+                    <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-stone-400">
+                      Karten: {activeGame.name}
+                    </p>
+                    <div className="flex flex-col gap-1.5">
+                      {activeGame.maps.map((m) => (
+                        <div key={m.id} className="flex items-center justify-between gap-2">
+                          <span className="truncate text-xs text-stone-300">
+                            {m.name ?? m.id}
+                            {m.id === (gameRef.current.mapId ?? mapIdRef.current) ? " ✓" : ""}
+                            {wonMaps.has(m.id) ? " ★" : ""}
+                          </span>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => editMap(m)}
+                            className="px-2 py-0.5 text-[10px]"
+                          >
+                            öffnen
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      <Button size="sm" variant="outline" onClick={addNewMap}>
+                        Neue Karte
+                      </Button>
+                      <Button size="sm" variant="outline" onClick={exportGame}>
+                        Spiel exportieren
+                      </Button>
+                    </div>
+                    <p className="mt-2 text-[10px] leading-snug text-stone-500">
+                      Änderungen gelten der geöffneten Karte im Speicher. „Spiel exportieren“ lädt alle Karten
+                      als JSON + PNG plus passende index.json herunter (Browser fragt ggf. nach Erlaubnis für
+                      mehrere Dateien) – Dateien in games/{activeGame.id}/ ablegen.
+                    </p>
+                  </div>
+                )}
 
                 <div className="rounded-lg border border-stone-700/60 bg-stone-900/40 p-3">
                   <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-stone-400">Karte</p>
@@ -4214,6 +5298,9 @@ export default function App() {
                     <Button size="sm" variant="outline" onClick={resetMap}>
                       Standardkarte
                     </Button>
+                    <Button size="sm" variant="outline" onClick={clearPolygons}>
+                      Alle Polygone entfernen
+                    </Button>
                     <Button size="sm" variant="outline" onClick={exportJson}>
                       JSON exportieren
                     </Button>
@@ -4221,17 +5308,88 @@ export default function App() {
                       JSON anwenden
                     </Button>
                   </div>
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <label className="text-[10px] uppercase tracking-wide text-stone-400">Kartengröße</label>
+                    <input
+                      type="number" min={400} max={20000} step={1} value={worldW}
+                      onChange={(e) => setWorldW(e.target.value)}
+                      className="w-24 rounded border border-stone-700 bg-stone-950 px-2 py-1 text-xs text-stone-200"
+                    />
+                    <span className="text-xs text-stone-500">×</span>
+                    <input
+                      type="number" min={400} max={20000} step={1} value={worldH}
+                      onChange={(e) => setWorldH(e.target.value)}
+                      className="w-24 rounded border border-stone-700 bg-stone-950 px-2 py-1 text-xs text-stone-200"
+                    />
+                    <span className="text-[10px] text-stone-500">px</span>
+                    <Button size="sm" variant="outline" onClick={applyWorldSize}>
+                      Größe setzen
+                    </Button>
+                  </div>
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <Button size="sm" variant="outline" onClick={bakeNavMesh}>
+                      Navmesh backen
+                    </Button>
+                    {navInfo ? (
+                      <span className="text-[10px] text-stone-400">
+                        Gebacken · rev {navInfo.rev} ·{" "}
+                        {NAV_KEYS.map((k) => k + ": " + navInfo.counts[k]).join(" · ")} Knoten · {navInfo.ms} ms ·{" "}
+                        {mapRef.current.navMesh && mapRef.current.navMesh.rev === navInfo.rev
+                          ? "im Karten-JSON gespeichert"
+                          : "Karte wurde danach geändert – neu backen"}
+                      </span>
+                    ) : (
+                      <span className="text-[10px] text-stone-500">
+                        Noch nicht gebacken – die Runtime baut Navmeshes on-demand.
+                      </span>
+                    )}
+                  </div>
+                  <div className="mt-2 rounded border border-stone-700/60 bg-stone-950/40 p-2">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-stone-400">Punkte-Reduktion</p>
+                    <div className="mt-1 flex flex-wrap items-center gap-2">
+                      <label className="text-[10px] text-stone-400">Toleranz {reduceTol} px</label>
+                      <input
+                        type="range"
+                        min={0.5}
+                        max={10}
+                        step={0.5}
+                        value={reduceTol}
+                        onChange={(e) => setReduceTol(Number(e.target.value))}
+                        className="w-40 accent-emerald-600"
+                      />
+                      <Button size="sm" variant="outline" onClick={reducePoints}>
+                        Punkte reduzieren
+                      </Button>
+                      <Button size="sm" variant="outline" onClick={undoReduce} disabled={!reduceInfo}>
+                        Rückgängig
+                      </Button>
+                    </div>
+                    <p className="mt-1 text-[10px] leading-snug text-stone-500">
+                      {reduceInfo
+                        ? "Letzte Reduktion: " +
+                          reduceInfo.before +
+                          " → " +
+                          reduceInfo.after +
+                          " Punkte (Toleranz " +
+                          reduceInfo.tol +
+                          " px). „Rückgängig“ stellt den Stand davor wieder her."
+                        : "Entfernt überflüssige Eckpunkte (Douglas-Peucker). Höhere Toleranz = gröbere Flächen. Vor dem Reduzieren wird automatisch ein Wiederherstellungspunkt angelegt."}
+                    </p>
+                  </div>
                   <textarea
                     value={jsonText}
                     onChange={(e) => setJsonText(e.target.value)}
-                    placeholder="Export fÃ¼llt dieses Feld; zum Importieren JSON hier einfÃ¼gen und 'JSON anwenden' klicken."
+                    placeholder="Export füllt dieses Feld; zum Importieren JSON hier einfügen und 'JSON anwenden' klicken."
                     className="mt-2 h-24 w-full rounded border border-stone-700 bg-stone-950 p-2 font-mono text-[10px] text-stone-300"
                   />
                   <input ref={bgFileRef} type="file" accept="image/*" onChange={onBgFile} className="hidden" />
                   <p className="mt-2 text-[10px] leading-snug text-stone-400">
                     Workflow: Polygone benennen, JSON exportieren, daraus ein Kartenbild generieren lassen, das Bild
-                    Ã¼ber âHintergrund ladenâ einlegen und die Polygone Ã¼ber das Bild ziehen, bis alles passt. Lokal
-                    wird auÃerdem automatisch public/map.jpg als Hintergrund verwendet.
+                    über „Hintergrund laden“ einlegen und die Polygone über das Bild ziehen, bis alles passt. Lokal
+                    wird außerdem automatisch public/map.png (oder map.jpg) als Hintergrund verwendet. Hintergründe werden 1:1 in
+                    voller Auflösung gezeichnet; das Laden eines Bildes setzt die Kartengröße auf die Bildgröße,
+                    per „Größe setzen“ (bis 20000 px) ist sie frei wählbar – bestehende Polygone werden dabei
+                    proportional mitskaliert.
                   </p>
                 </div>
               </>
@@ -4239,6 +5397,88 @@ export default function App() {
           </div>
         </div>
       </div>
+
+      {menuOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
+          <div className="max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-lg border border-stone-700 bg-stone-950 p-4">
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="font-serif text-xl font-bold text-amber-100">Spiel wählen</h2>
+              <Button size="sm" variant="outline" onClick={() => setMenuOpen(false)}>
+                Schließen
+              </Button>
+            </div>
+            <div className="mb-3 flex flex-wrap items-center gap-2 rounded border border-stone-800 bg-stone-900/40 p-2">
+              <label className="text-[10px] uppercase tracking-wide text-stone-400">Maps-Repository</label>
+              <input
+                type="text"
+                value={repoUrl}
+                onChange={(e) => setRepoUrl(e.target.value)}
+                placeholder="https://github.com/owner/maps-repo (Hauptzweig) oder raw-URL"
+                className="min-w-[240px] flex-1 rounded border border-stone-700 bg-stone-950 px-2 py-1 text-xs text-stone-200"
+              />
+              <Button size="sm" variant="outline" onClick={() => loadCollection(repoUrl)}>
+                Repo laden
+              </Button>
+            </div>
+            {loadingMaps && <p className="mb-2 text-sm text-amber-200">Karten werden geladen …</p>}
+            <div className="flex flex-col gap-2">
+              {(collection?.games ?? []).map((gm) => (
+                <div key={gm.source + "/" + gm.id} className="rounded border border-stone-800 bg-stone-900/40 p-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-sm font-semibold text-stone-200">
+                      {gm.name}
+                      <span className="ml-2 text-[10px] uppercase tracking-wide text-stone-500">
+                        {gm.source === "builtin"
+                          ? "eingebaut"
+                          : gm.source === "local"
+                            ? "Server /games"
+                            : "Repository"}
+                        {" · "}
+                        {gm.maps.length} Karte{gm.maps.length !== 1 ? "n" : ""}
+                      </span>
+                    </span>
+                    <div className="flex gap-2">
+                      <Button
+                        size="sm"
+                        className="bg-emerald-700 text-white hover:bg-emerald-600"
+                        onClick={() => startGameMap(gm, 0, false)}
+                      >
+                        Spielen
+                      </Button>
+                      <Button size="sm" variant="outline" onClick={() => startGameMap(gm, 0, true)}>
+                        Im Editor öffnen
+                      </Button>
+                    </div>
+                  </div>
+                  {gm.maps.length > 0 && (
+                    <div className="mt-1.5 flex flex-wrap gap-1.5">
+                      {gm.maps.map((m, i) => (
+                        <Button
+                          key={m.id}
+                          size="sm"
+                          variant="outline"
+                          className="px-2 py-0.5 text-[10px]"
+                          onClick={() => startGameMap(gm, i, false)}
+                        >
+                          {i + 1}. {m.name ?? m.id}{wonMaps.has(m.id) ? " ★" : ""}
+                        </Button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+              {!collection && <p className="text-sm text-stone-400">Lade verfügbare Spiele …</p>}
+            </div>
+            <p className="mt-3 text-[10px] leading-snug text-stone-500">
+              Lokale Spiele: Ordner „games/&lt;spiel-id&gt;/“ mit index.json auf dem Server (Docker: Volume-Mount auf
+              /usr/share/nginx/html/games). Repository: gleiche Struktur in einem öffentlichen Git-Repo, als URL
+              oben eintragen. Jede Karte ist eine Kombination aus Karten-JSON und Hintergrundbild. Gewonnene
+              Karten führen per „Nächste Karte“ weiter; Interaktionsflächen vom Typ „Karte wechseln“ springen
+              direkt auf die gewählte Karte.
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
